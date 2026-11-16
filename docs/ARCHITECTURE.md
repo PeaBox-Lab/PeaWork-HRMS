@@ -20,3 +20,7 @@ Talent remains inside the modular monolith and reuses employee, manager, departm
 
 ## v0.5 payroll beta module
 Payroll remains in the modular monolith and consumes employee, compensation, attendance, reimbursement, identity and audit records. Configuration is separated into component definitions, statutory rule versions, salary structures and effective-dated employee compensation. Payroll previews snapshot employee totals and component lines so finalized payslips and accounting exports remain traceable even when later configuration changes. Statutory rule versions are effective-dated and validation-gated. Finalization performs calculation, mapping and variance controls; accounting export independently proves debit-credit balance.
+
+
+## v0.6 cloud control plane
+Cloud beta separates global control metadata from tenant application data. The control database stores tenant identity, domains, subscriptions, identity-provider metadata, hashed SCIM credentials, storage settings, backup policies, service checks, migration jobs and cloud audit events. Domain data uses database-per-tenant SQLite for local cloud simulation and schema-per-tenant PostgreSQL for the cloud target. Request context selects one tenant before any domain query executes. Session signatures include the tenant slug. Upload storage keys are tenant-prefixed. The migration assistant copies or loads a complete local SQLite population into one isolated destination.

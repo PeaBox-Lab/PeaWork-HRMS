@@ -77,3 +77,21 @@ Payroll calculations, statutory filings, biometric devices, recruiting, performa
 13. Accounting export identifies debits and credits and is delivered only when balanced.
 14. Payroll APIs require an authorized session.
 15. Existing v0.4 databases receive the v0.5 schema without destructive migration.
+
+## v0.6 acceptance criteria
+1. The control plane can create an isolated tenant and initialize the full PeaWork schema.
+2. Tenant application data is stored in a separate SQLite file or PostgreSQL schema.
+3. A tenant session token cannot be replayed against another tenant.
+4. Switching tenants invalidates the previous application session.
+5. Only the local control tenant can administer the global cloud control plane.
+6. Subscription employee limits block employee creation and candidate conversion at the configured threshold.
+7. Custom domains have unique verification tokens and tracked verification/TLS states.
+8. OIDC/SAML provider configuration is recorded per tenant without representing unvalidated federation as enabled.
+9. SCIM bearer tokens are displayed once, stored only as hashes and provision users only into the target tenant.
+10. Uploads support tenant-prefixed local or S3-compatible object storage.
+11. Health checks record control and tenant database status and latency.
+12. Backup policies record retention, PITR, RPO and RTO; backup runs preserve outcome and location.
+13. Migration preflight inventories the full SQLite source and requires explicit execution confirmation.
+14. Migration supports isolated SQLite destinations and PostgreSQL tenant schemas.
+15. Cloud APIs require a control-tenant administrator.
+16. Existing v0.5 local operation remains available on port 8090.

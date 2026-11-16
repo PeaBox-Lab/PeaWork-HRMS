@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 - Cloud beta
+- Added a separate cloud control plane and audit trail.
+- Added database/schema-per-tenant isolation and tenant-bound sessions.
+- Added PostgreSQL tenant-schema support and cloud Compose configuration.
+- Added S3-compatible tenant-prefixed object storage.
+- Added subscription plans, lifecycle state and employee-limit enforcement.
+- Added custom-domain verification and TLS orchestration state.
+- Added OIDC/SAML configuration records and hashed one-time SCIM credentials.
+- Added core SCIM user provisioning with role allow-listing.
+- Added health checks, metrics, backup policies, backup runs and PITR tracking.
+- Added local SQLite preflight and migration into SQLite or PostgreSQL tenant targets.
+- Added cloud security tests, acceptance criteria, environment templates and operating documentation.
+
 ## 0.5.0 - India payroll beta
 - Added configurable earnings, deductions, reimbursements and employer costs.
 - Added effective-dated statutory rule versions with qualified-validation gates.

@@ -3,7 +3,10 @@ from fastapi.testclient import TestClient
 fd, path = tempfile.mkstemp(suffix='.db')  
 os.close(fd)  
 os.environ['PEAWORK_DATABASE'] = path  
-os.environ['PEAWORK_SECRET'] = 'test-secret'  
+os.environ['PEAWORK_SECRET'] = 'test-secret'
+control_fd, control_path = tempfile.mkstemp(suffix='.db'); os.close(control_fd)
+os.environ['PEAWORK_CONTROL_DATABASE'] = control_path
+os.environ['PEAWORK_TENANT_DATABASE_ROOT'] = tempfile.mkdtemp(prefix='peawork-tenants-')  
 from app.main import app, q, seed  
 from app.db import init_db  
 def client():  
@@ -195,3 +198,67 @@ def test_payroll_apis_require_authentication():
     with client() as c:
         for path in ['/api/v1/payroll-periods','/api/v1/payroll-runs','/api/v1/payslips']:
             assert c.get(path,follow_redirects=False).status_code in (303,307)
+
+
+
+def test_cloud_tenant_isolation_and_controls():
+    from app.cloud_control import init_control_db,control_conn,issue_scim_token
+    from app.db import set_tenant,reset_tenant
+    from app.main import tenant_employee_limit
+    init_control_db()
+    with control_conn() as db:
+        plan=db.execute('SELECT id FROM subscription_plans LIMIT 1').fetchone()['id']
+        alpha=db.execute("INSERT INTO tenants(slug,name) VALUES('alpha-test','Alpha Test')").lastrowid
+        beta=db.execute("INSERT INTO tenants(slug,name) VALUES('beta-test','Beta Test')").lastrowid
+        for tid,slug in [(alpha,'alpha-test'),(beta,'beta-test')]:
+            db.execute("INSERT INTO tenant_subscriptions(tenant_id,plan_id,status,starts_on,employee_limit_override) VALUES(?,?,'Active','2026-11-16',3)",(tid,plan))
+            db.execute("INSERT INTO storage_configurations(tenant_id,backend,prefix,status) VALUES(?,'Local',?,'Active')",(tid,slug))
+    for slug in ['alpha-test','beta-test']:
+        token=set_tenant(slug)
+        try:
+            init_db()
+            if not q('SELECT id FROM users LIMIT 1',one=True):seed()
+        finally:reset_tenant(token)
+    token=set_tenant('alpha-test')
+    try:
+        from app.main import execq
+        execq("INSERT INTO employees(employee_no,first_name,last_name,status) VALUES('A100','Alpha','Only','Active')")
+        assert q("SELECT COUNT(*) n FROM employees WHERE employee_no='A100'",one=True)['n']==1
+        assert tenant_employee_limit()==3
+    finally:reset_tenant(token)
+    token=set_tenant('beta-test')
+    try:assert q("SELECT COUNT(*) n FROM employees WHERE employee_no='A100'",one=True)['n']==0
+    finally:reset_tenant(token)
+
+
+def test_tenant_bound_session_and_scim_provisioning():
+    import asyncio
+    from app.cloud_control import control_conn,issue_scim_token
+    from app.db import set_tenant,reset_tenant
+    from app.main import me,scim_user_create
+    from app.security import token
+    class SessionRequest: cookies={'peawork_session':token(1,'admin','alpha-test')}
+    context=set_tenant('beta-test')
+    try:assert me(SessionRequest()) is None
+    finally:reset_tenant(context)
+    plain,digest,prefix=issue_scim_token()
+    with control_conn() as db:
+        tenant=db.execute("SELECT id FROM tenants WHERE slug='alpha-test'").fetchone()
+        db.execute("INSERT INTO scim_credentials(tenant_id,name,token_hash,token_prefix) VALUES(?,?,?,?)",(tenant['id'],'Automated Test',digest,prefix))
+    class ScimRequest:
+        headers={'authorization':'Bearer '+plain}
+        async def json(self):return {'userName':'scim.test','role':'manager','active':True}
+    result=asyncio.run(scim_user_create(ScimRequest()))
+    assert result['userName']=='scim.test'
+    context=set_tenant('alpha-test')
+    try:assert q("SELECT role FROM users WHERE username='scim.test'",one=True)['role']=='manager'
+    finally:reset_tenant(context)
+    context=set_tenant('beta-test')
+    try:assert q("SELECT id FROM users WHERE username='scim.test'",one=True) is None
+    finally:reset_tenant(context)
+
+
+def test_cloud_apis_require_control_admin():
+    with client() as c:
+        for endpoint in ['/api/v1/cloud/tenants','/api/v1/cloud/service-checks']:
+            assert c.get(endpoint,follow_redirects=False).status_code in (303,307)

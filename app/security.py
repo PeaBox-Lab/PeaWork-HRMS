@@ -7,8 +7,8 @@ def verify_password(p,stored):
     try:    
         salt,_=stored.split('$',1); return hmac.compare_digest(hash_password(p,salt),stored)    
     except: return False    
-def token(uid,role,ttl=28800):    
-    data=base64.urlsafe_b64encode(json.dumps({'u':uid,'r':role,'e':int(time.time())+ttl}).encode()).decode()    
+def token(uid,role,tenant='local',ttl=28800):
+    data=base64.urlsafe_b64encode(json.dumps({'u':uid,'r':role,'t':tenant,'e':int(time.time())+ttl}).encode()).decode()    
     sig=hmac.new(SECRET,data.encode(),hashlib.sha256).hexdigest(); return data+'.'+sig    
 def untoken(t):    
     try:    

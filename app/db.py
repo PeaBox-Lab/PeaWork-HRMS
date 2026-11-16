@@ -1,13 +1,59 @@
-import sqlite3, os  
-from pathlib import Path  
-BASE = Path(__file__).resolve().parent.parent  
-DB = Path(os.getenv("PEAWORK_DATABASE", str(BASE / "data" / "peawork.db")))  
-DB.parent.mkdir(parents=True, exist_ok=True)  
-def conn():  
-    c = sqlite3.connect(DB)  
-    c.row_factory = sqlite3.Row  
-    c.execute("PRAGMA foreign_keys=ON")  
-    return c  
+import os, re, sqlite3
+from contextvars import ContextVar
+from pathlib import Path
+
+BASE=Path(__file__).resolve().parent.parent
+DEFAULT_DB=Path(os.getenv("PEAWORK_DATABASE",str(BASE/'data'/'peawork.db')))
+DEFAULT_DB.parent.mkdir(parents=True,exist_ok=True)
+TENANT_SLUG=ContextVar('peawork_tenant_slug',default=os.getenv('PEAWORK_DEFAULT_TENANT','local'))
+
+def set_tenant(slug): return TENANT_SLUG.set(slug or 'local')
+def reset_tenant(token): TENANT_SLUG.reset(token)
+def current_tenant(): return TENANT_SLUG.get()
+
+def tenant_db_path(slug=None):
+    resolved=slug or current_tenant()
+    if resolved!='local' or os.getenv('PEAWORK_ENV','local').startswith('cloud'):
+        root=Path(os.getenv('PEAWORK_TENANT_DATABASE_ROOT',str(DEFAULT_DB.parent/'tenants')))
+        path=root/f"{resolved}.db";path.parent.mkdir(parents=True,exist_ok=True);return path
+    return DEFAULT_DB
+
+class PgCursor:
+    def __init__(self,cur,lastrowid=None): self.cur=cur;self.lastrowid=lastrowid
+    def fetchall(self): return self.cur.fetchall()
+    def fetchone(self): return self.cur.fetchone()
+
+class PgConnection:
+    def __init__(self,raw,schema): self.raw=raw;self.schema=schema
+    def __enter__(self): self.raw.execute(f'SET search_path TO "{self.schema}",public');return self
+    def __exit__(self,typ,val,tb):
+        if typ:self.raw.rollback()
+        else:self.raw.commit()
+        self.raw.close()
+    def execute(self,sql,args=()):
+        converted=sql.replace('?','%s');is_insert=converted.lstrip().upper().startswith('INSERT INTO')
+        table_match=re.match(r'\s*INSERT\s+INTO\s+([A-Za-z0-9_]+)',converted,re.I);table=table_match.group(1).lower() if table_match else ''
+        returns_id=is_insert and table not in {'settings'}
+        if returns_id and 'RETURNING' not in converted.upper(): converted=converted.rstrip().rstrip(';')+' RETURNING id'
+        cur=self.raw.execute(converted,args);last=None
+        if returns_id:
+            row=cur.fetchone();last=row['id'] if row and 'id' in row else None
+        return PgCursor(cur,last)
+    def executescript(self,script):
+        for stmt in [x.strip() for x in script.split(';') if x.strip()]:self.raw.execute(stmt)
+
+def conn():
+    url=os.getenv('PEAWORK_DATABASE_URL','')
+    if url.startswith('postgresql'):
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as e: raise RuntimeError('PostgreSQL mode requires psycopg[binary]') from e
+        schema='tenant_'+re.sub(r'[^a-z0-9_]','_',current_tenant().lower())
+        raw=psycopg.connect(url,row_factory=dict_row);raw.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+        return PgConnection(raw,schema)
+    c=sqlite3.connect(tenant_db_path());c.row_factory=sqlite3.Row;c.execute('PRAGMA foreign_keys=ON');return c
+
 def init_db():  
     schema = """  
     CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL, employee_id INTEGER, active INTEGER DEFAULT 1);  
@@ -339,6 +385,9 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_payroll_inputs_period ON payroll_inputs(period_id,employee_id);
     CREATE INDEX IF NOT EXISTS idx_payroll_run_employee ON payroll_run_employees(run_id,employee_id);
     CREATE INDEX IF NOT EXISTS idx_payroll_lines_employee ON payroll_run_lines(run_employee_id,component_type);
-    """  
-    with conn() as c:  
+    """
+    if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql'):
+        schema=re.sub(r'INTEGER PRIMARY KEY','BIGSERIAL PRIMARY KEY',schema)
+        schema=re.sub(r'\bREAL\b','DOUBLE PRECISION',schema)
+    with conn() as c:
         c.executescript(schema)

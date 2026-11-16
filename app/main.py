@@ -5,33 +5,58 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path    
 from datetime import date,datetime,timedelta
 from decimal import Decimal, ROUND_HALF_UP    
-import csv,io,json,os,shutil    
-from .db import conn,init_db    
-from .security import hash_password,verify_password,token,untoken    
+import csv,io,json,os,shutil,secrets,sqlite3,time    
+from .db import conn,init_db,set_tenant,reset_tenant,current_tenant,tenant_db_path    
+from .security import hash_password,verify_password,token,untoken
+from .cloud_control import control_conn,init_control_db,clean_slug,issue_scim_token,hash_token,cloud_audit,resolve_tenant
+from .storage import store_upload    
 BASE=Path(__file__).resolve().parent.parent; UPLOADS=BASE/'uploads'; UPLOADS.mkdir(exist_ok=True)    
-app=FastAPI(title='PeaWork HRIS',version='0.5.0',description='India-first local and cloud-ready HRIS')    
-app.mount('/static',StaticFiles(directory=BASE/'app'/'static'),name='static'); templates=Jinja2Templates(directory=BASE/'app'/'templates')    
+app=FastAPI(title='PeaWork HRIS',version='0.6.0',description='India-first local and cloud-ready HRIS')    
+app.mount('/static',StaticFiles(directory=BASE/'app'/'static'),name='static'); templates=Jinja2Templates(directory=BASE/'app'/'templates')
+@app.middleware('http')
+async def tenant_context_middleware(request,call_next):
+    slug=request.cookies.get('peawork_tenant') or request.headers.get('x-peawork-tenant')
+    tenant=resolve_tenant(request.headers.get('host'),slug)
+    resolved=tenant['slug'] if tenant else (slug or os.getenv('PEAWORK_DEFAULT_TENANT','local'))
+    context_token=set_tenant(resolved)
+    try:
+        request.state.tenant=tenant or {'slug':resolved,'name':'Local','id':None}
+        return await call_next(request)
+    finally:
+        reset_tenant(context_token)
 def q(sql,args=(),one=False):    
     with conn() as c:    
         r=c.execute(sql,args).fetchall(); return (dict(r[0]) if r and one else None) if one else [dict(x) for x in r]    
 def execq(sql,args=()):    
     with conn() as c:    
         cur=c.execute(sql,args); return cur.lastrowid    
-def audit(actor,action,etype,eid='',details='',ip=''):    
-    execq('INSERT INTO audit_log(actor,action,entity_type,entity_id,details,ip) VALUES(?,?,?,?,?,?)',(actor,action,etype,str(eid),details,ip))    
-def me(request):    
-    t=request.cookies.get('peawork_session'); x=untoken(t) if t else None    
-    return q('SELECT id,username,role,employee_id FROM users WHERE id=? AND active=1',(x['u'],),True) if x else None    
+def audit(actor,action,etype,eid='',details='',ip=''):
+    execq('INSERT INTO audit_log(actor,action,entity_type,entity_id,details,ip) VALUES(?,?,?,?,?,?)',(actor,action,etype,str(eid),details,ip))
+def tenant_employee_limit():
+    tenant=resolve_tenant(slug=current_tenant())
+    if not tenant:return None
+    with control_conn() as c:
+        row=c.execute("SELECT COALESCE(s.employee_limit_override,p.employee_limit) employee_limit FROM tenant_subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.tenant_id=? AND s.status IN ('Trial','Active')",(tenant['id'],)).fetchone()
+        return row['employee_limit'] if row else None
+def enforce_employee_limit():
+    limit=tenant_employee_limit()
+    if limit is not None and q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n']>=limit:
+        raise HTTPException(403,'Tenant employee subscription limit reached')
+def me(request):
+    t=request.cookies.get('peawork_session'); x=untoken(t) if t else None
+    if not x or x.get('t','local')!=current_tenant(): return None
+    return q('SELECT id,username,role,employee_id FROM users WHERE id=? AND active=1',(x['u'],),True)    
 def require(request:Request,roles=None):    
     u=me(request)    
     if not u: raise HTTPException(401,'Login required')    
     if roles and u['role'] not in roles: raise HTTPException(403,'Insufficient permissions')    
     return u    
-def page(request,name,**ctx):    
-    u=me(request); notes=q('SELECT * FROM notifications WHERE user_id=? AND read_at IS NULL ORDER BY id DESC LIMIT 5',(u['id'],)) if u else []    
-    return templates.TemplateResponse(request,name,{'user':u,'notifications':notes,'today':date.today().isoformat(),**ctx})    
-@app.on_event('startup')    
-def startup():    
+def page(request,name,**ctx):
+    u=me(request); notes=q('SELECT * FROM notifications WHERE user_id=? AND read_at IS NULL ORDER BY id DESC LIMIT 5',(u['id'],)) if u else []
+    return templates.TemplateResponse(request,name,{'user':u,'notifications':notes,'today':date.today().isoformat(),'tenant':getattr(request.state,'tenant',{'slug':current_tenant(),'name':'Local'}),**ctx})
+@app.on_event('startup')
+def startup():
+    init_control_db()
     init_db()    
     if not q('SELECT id FROM users LIMIT 1',one=True): seed()    
 def seed():    
@@ -79,13 +104,13 @@ def seed():
         ('OTHERDED','Other Deduction','Deduction','Input',0,60),
     ]:
         execq('INSERT INTO pay_components(code,name,component_type,calculation_type,taxable,display_order) VALUES(?,?,?,?,?,?)',(code,name,ctype,calc,taxable,order))
-    audit('system','SEED','database','','Demo organization initialized through v0.5 payroll beta')    
+    audit('system','SEED','database','','Demo organization initialized through v0.6 cloud beta')    
 @app.exception_handler(401)    
 async def unauthorized(request,exc): return RedirectResponse('/login?error=Please+sign+in',303)    
 @app.exception_handler(403)    
 async def forbidden(request,exc): return page(request,'error.html',code=403,message='You do not have access to this action.')    
 @app.get('/health')    
-def health(): return {'status':'ok','version':'0.5.0','deployment':os.getenv('PEAWORK_ENV','local')}    
+def health(): return {'status':'ok','version':'0.6.0','deployment':os.getenv('PEAWORK_ENV','local'),'tenant':current_tenant(),'database':'postgresql' if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql') else 'sqlite','storage':os.getenv('PEAWORK_STORAGE_BACKEND','configured')}    
 @app.get('/login',response_class=HTMLResponse)    
 def login_page(request:Request,error:str=''): return page(request,'login.html',error=error)    
 @app.post('/login')    
@@ -93,7 +118,8 @@ def login(request:Request,username:str=Form(...),password:str=Form(...)):
     u=q('SELECT * FROM users WHERE username=? AND active=1',(username,),True)    
     if not u or not verify_password(password,u['password_hash']):    
         audit(username,'LOGIN_FAILED','session','','',request.client.host); return RedirectResponse('/login?error=Invalid+credentials',303)    
-    r=RedirectResponse('/',303); r.set_cookie('peawork_session',token(u['id'],u['role']),httponly=True,samesite='lax',secure=False,max_age=28800)    
+    secure_cookie=os.getenv('PEAWORK_ENV','local').startswith('cloud')
+    r=RedirectResponse('/',303); r.set_cookie('peawork_session',token(u['id'],u['role'],current_tenant()),httponly=True,samesite='lax',secure=secure_cookie,max_age=28800)    
     audit(username,'LOGIN','session',u['id'],'',request.client.host); return r    
 @app.get('/logout')    
 def logout(request:Request):    
@@ -115,8 +141,9 @@ def employees(request:Request,search:str=''):
 @app.get('/employees/new',response_class=HTMLResponse)    
 def employee_new(request:Request): require(request,['admin','hr']);return page(request,'employee_form.html',employee=None,departments=q('SELECT * FROM departments WHERE active=1'),positions=q('SELECT * FROM positions WHERE active=1'),managers=q("SELECT id,first_name||' '||last_name name FROM employees WHERE status='Active'"))    
 @app.post('/employees/new')    
-def employee_create(request:Request,employee_no:str=Form(...),first_name:str=Form(...),last_name:str=Form(...),work_email:str=Form(''),phone:str=Form(''),date_of_joining:str=Form(''),employment_type:str=Form('Full-time'),department_id:int|None=Form(None),position_id:int|None=Form(None),manager_id:int|None=Form(None),location:str=Form('Gurugram')):    
-    u=require(request,['admin','hr'])    
+def employee_create(request:Request,employee_no:str=Form(...),first_name:str=Form(...),last_name:str=Form(...),work_email:str=Form(''),phone:str=Form(''),date_of_joining:str=Form(''),employment_type:str=Form('Full-time'),department_id:int|None=Form(None),position_id:int|None=Form(None),manager_id:int|None=Form(None),location:str=Form('Gurugram')):
+    u=require(request,['admin','hr'])
+    enforce_employee_limit()
     eid=execq("""INSERT INTO employees(employee_no,first_name,last_name,work_email,phone,date_of_joining,employment_type,department_id,position_id,manager_id,location) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(employee_no,first_name,last_name,work_email or None,phone,date_of_joining,employment_type,department_id,position_id,manager_id,location))    
     execq('INSERT INTO employee_history(employee_id,effective_date,change_type,new_value) VALUES(?,?,?,?)',(eid,date_of_joining or date.today().isoformat(),'HIRE',json.dumps({'department_id':department_id,'position_id':position_id})))    
     audit(u['username'],'CREATE','employee',eid,employee_no,request.client.host); return RedirectResponse(f'/employees/{eid}',303)    
@@ -150,9 +177,8 @@ def leave_decision(lid:int,request:Request,decision:str=Form(...),comment:str=Fo
 def documents(request:Request): require(request);return page(request,'documents.html',documents=q("SELECT x.*,e.employee_no,e.first_name||' '||e.last_name employee FROM documents x LEFT JOIN employees e ON e.id=x.employee_id ORDER BY x.id DESC"),employees=q("SELECT id,employee_no||' - '||first_name||' '||last_name name FROM employees ORDER BY first_name"))    
 @app.post('/documents/upload')    
 def upload_document(request:Request,employee_id:int|None=Form(None),category:str=Form(...),title:str=Form(...),expires_on:str=Form(''),file:UploadFile=File(...)):    
-    u=require(request,['admin','hr']); safe=''.join(c for c in file.filename if c.isalnum() or c in '._-')[:100]; target=UPLOADS/(datetime.now().strftime('%Y%m%d%H%M%S')+'_'+safe)    
-    with target.open('wb') as f: shutil.copyfileobj(file.file,f)    
-    i=execq('INSERT INTO documents(employee_id,category,title,filename,storage_path,expires_on) VALUES(?,?,?,?,?,?)',(employee_id,category,title,file.filename,str(target),expires_on or None));audit(u['username'],'UPLOAD','document',i,file.filename);return RedirectResponse('/documents',303)    
+    u=require(request,['admin','hr']); storage_path=store_upload(file.file,file.filename,'employee-documents')
+    i=execq('INSERT INTO documents(employee_id,category,title,filename,storage_path,expires_on) VALUES(?,?,?,?,?,?)',(employee_id,category,title,file.filename,storage_path,expires_on or None));audit(u['username'],'UPLOAD','document',i,file.filename);return RedirectResponse('/documents',303)    
 @app.get('/reports',response_class=HTMLResponse)    
 def reports(request:Request):    
     require(request,['admin','hr','manager']); bydept=q("SELECT COALESCE(d.name,'Unassigned') label,COUNT(*) value FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.status='Active' GROUP BY d.name ORDER BY value DESC");bystatus=q('SELECT status label,COUNT(*) value FROM employees GROUP BY status');leavestat=q('SELECT status label,COUNT(*) value FROM leave_requests GROUP BY status');return page(request,'reports.html',bydept=bydept,bystatus=bystatus,leavestat=leavestat)    
@@ -231,10 +257,7 @@ def candidate_create(request:Request, first_name:str=Form(...), last_name:str=Fo
     filename=path=None  
     if resume and resume.filename:  
         filename=resume.filename  
-        safe=''.join(c for c in filename if c.isalnum() or c in '._-')[:100]  
-        target=UPLOADS/(datetime.now().strftime('%Y%m%d%H%M%S')+'_resume_'+safe)  
-        with target.open('wb') as f: shutil.copyfileobj(resume.file,f)  
-        path=str(target)  
+        path=store_upload(resume.file,filename,'candidate-resumes')  
     candidate_no=next_number('candidates','CAN-')  
     cid=execq("""INSERT INTO candidates(candidate_no,first_name,last_name,email,phone,current_company,experience_years,source,resume_filename,resume_path)  
       VALUES(?,?,?,?,?,?,?,?,?,?)""",(candidate_no,first_name,last_name,email.lower(),phone,current_company,max(0,experience_years),source,filename,path))  
@@ -375,7 +398,8 @@ def onboarding_convert(nid:int, request:Request, employee_no:str=Form(''), depar
       FROM onboardings n JOIN candidates c ON c.id=n.candidate_id JOIN offers o ON o.id=n.offer_id  
       JOIN applications r ON r.id=o.application_id WHERE n.id=?""",(nid,),True)  
     if not record: raise HTTPException(404,'Onboarding not found')  
-    if record['employee_id']: raise HTTPException(400,'Candidate already converted')  
+    if record['employee_id']: raise HTTPException(400,'Candidate already converted')
+    enforce_employee_limit()
     employee_no=employee_no or next_number('employees','PW')  
     with conn() as c:  
         cur=c.execute("""INSERT INTO employees(employee_no,first_name,last_name,work_email,phone,date_of_joining,employment_type,status,department_id,position_id,manager_id,location)  
@@ -1211,3 +1235,215 @@ def payroll_component_mapping(cid:int,request:Request,gl_account:str=Form(...),l
     execq('UPDATE pay_components SET gl_account=?,liability_account=?,statutory_rule_name=CASE WHEN ?=\'\' THEN statutory_rule_name ELSE ? END WHERE id=?',(gl_account,liability_account or None,statutory_rule_name,statutory_rule_name,cid))
     audit(u['username'],'MAP','pay_component',cid,gl_account)
     return RedirectResponse('/payroll',303)
+
+# ----------------------------- v0.6 Cloud beta -----------------------------
+def require_platform_admin(request):
+    u=require(request,['admin'])
+    if current_tenant()!='local':raise HTTPException(403,'Cloud control is available only from the local control tenant')
+    return u
+
+def cloud_context():
+    with control_conn() as c:
+        return {'tenants':[dict(x) for x in c.execute('SELECT * FROM tenants ORDER BY name').fetchall()],'domains':[dict(x) for x in c.execute('SELECT d.*,t.name tenant FROM tenant_domains d JOIN tenants t ON t.id=d.tenant_id ORDER BY t.name,d.domain').fetchall()],'plans':[dict(x) for x in c.execute('SELECT * FROM subscription_plans WHERE active=1 ORDER BY employee_limit').fetchall()],'subscriptions':[dict(x) for x in c.execute('SELECT s.*,t.name tenant,p.name plan,p.employee_limit FROM tenant_subscriptions s JOIN tenants t ON t.id=s.tenant_id JOIN subscription_plans p ON p.id=s.plan_id ORDER BY t.name').fetchall()],'identity_providers':[dict(x) for x in c.execute('SELECT i.*,t.name tenant FROM identity_providers i JOIN tenants t ON t.id=i.tenant_id ORDER BY t.name,i.name').fetchall()],'scim_credentials':[dict(x) for x in c.execute('SELECT s.id,s.tenant_id,s.name,s.token_prefix,s.status,s.created_at,s.last_used_at,t.name tenant FROM scim_credentials s JOIN tenants t ON t.id=s.tenant_id ORDER BY t.name,s.name').fetchall()],'storage_configs':[dict(x) for x in c.execute('SELECT s.*,t.name tenant FROM storage_configurations s JOIN tenants t ON t.id=s.tenant_id ORDER BY t.name').fetchall()],'backup_policies':[dict(x) for x in c.execute('SELECT b.*,t.name tenant FROM backup_policies b JOIN tenants t ON t.id=b.tenant_id ORDER BY t.name').fetchall()],'backup_runs':[dict(x) for x in c.execute('SELECT b.*,t.name tenant FROM backup_runs b JOIN tenants t ON t.id=b.tenant_id ORDER BY b.id DESC LIMIT 50').fetchall()],'migrations':[dict(x) for x in c.execute('SELECT m.*,t.name tenant FROM migration_jobs m JOIN tenants t ON t.id=m.tenant_id ORDER BY m.id DESC').fetchall()],'checks':[dict(x) for x in c.execute('SELECT s.*,t.name tenant FROM service_checks s LEFT JOIN tenants t ON t.id=s.tenant_id ORDER BY s.id DESC LIMIT 100').fetchall()],'cloud_audit_rows':[dict(x) for x in c.execute('SELECT a.*,t.name tenant FROM cloud_audit a LEFT JOIN tenants t ON t.id=a.tenant_id ORDER BY a.id DESC LIMIT 100').fetchall()]}
+
+@app.get('/cloud',response_class=HTMLResponse)
+def cloud_console(request:Request): require_platform_admin(request);return page(request,'cloud.html',**cloud_context())
+
+@app.post('/cloud/tenants')
+def tenant_create(request:Request,name:str=Form(...),slug:str=Form(...),region:str=Form('india-central'),plan_id:int=Form(...),admin_username:str=Form('admin')):
+    u=require_platform_admin(request);slug=clean_slug(slug)
+    with control_conn() as c:
+        cur=c.execute('INSERT INTO tenants(slug,name,region,storage_prefix) VALUES(?,?,?,?)',(slug,name,region,slug));tenant_id=cur.lastrowid
+        c.execute("INSERT INTO tenant_memberships(tenant_id,username,role) VALUES(?,?,'owner')",(tenant_id,admin_username));c.execute("INSERT INTO tenant_subscriptions(tenant_id,plan_id,status,starts_on) VALUES(?,?,'Trial',?)",(tenant_id,plan_id,date.today().isoformat()));c.execute("INSERT INTO storage_configurations(tenant_id,backend,prefix,status) VALUES(?,'Local',?,'Active')",(tenant_id,slug));c.execute("INSERT INTO backup_policies(tenant_id,frequency,retention_days,pitr_enabled) VALUES(?,'Daily',30,0)",(tenant_id,))
+    context=set_tenant(slug)
+    try:
+        init_db()
+        if not q('SELECT id FROM users LIMIT 1',one=True):seed()
+        if admin_username!='admin':execq("UPDATE users SET username=? WHERE username='admin'",(admin_username,))
+    finally:reset_tenant(context)
+    cloud_audit(u['username'],'CREATE','tenant',tenant_id,slug,tenant_id);r=RedirectResponse('/login',303);r.set_cookie('peawork_tenant',slug,httponly=True,samesite='lax');r.delete_cookie('peawork_session');return r
+
+@app.post('/cloud/tenant/switch')
+def tenant_switch(request:Request,slug:str=Form(...)):
+    require_platform_admin(request);tenant=resolve_tenant(slug=slug)
+    if not tenant:raise HTTPException(404,'Tenant not found')
+    r=RedirectResponse('/login',303);r.set_cookie('peawork_tenant',slug,httponly=True,samesite='lax');r.delete_cookie('peawork_session');return r
+
+@app.post('/cloud/domains')
+def tenant_domain_create(request:Request,tenant_id:int=Form(...),domain:str=Form(...)):
+    u=require_platform_admin(request);domain=domain.lower().strip();verification=secrets.token_urlsafe(18)
+    with control_conn() as c:did=c.execute('INSERT INTO tenant_domains(tenant_id,domain,verification_token) VALUES(?,?,?)',(tenant_id,domain,verification)).lastrowid
+    cloud_audit(u['username'],'CREATE','tenant_domain',did,domain,tenant_id);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/domains/{did}/verify')
+def tenant_domain_verify(did:int,request:Request,verification_token:str=Form(...)):
+    u=require_platform_admin(request)
+    with control_conn() as c:
+        row=c.execute('SELECT * FROM tenant_domains WHERE id=?',(did,)).fetchone()
+        if not row or not secrets.compare_digest(row['verification_token'],verification_token):raise HTTPException(400,'Domain verification token does not match')
+        c.execute("UPDATE tenant_domains SET status='Verified',verified_at=CURRENT_TIMESTAMP,tls_status='Provisioning' WHERE id=?",(did,))
+    cloud_audit(u['username'],'VERIFY','tenant_domain',did,row['domain'],row['tenant_id']);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/subscriptions/{tenant_id}')
+def subscription_update(tenant_id:int,request:Request,plan_id:int=Form(...),status:str=Form('Active'),employee_limit_override:int|None=Form(None),renews_on:str=Form('')):
+    u=require_platform_admin(request)
+    if status not in ['Trial','Active','Past Due','Suspended','Cancelled']:raise HTTPException(400,'Invalid subscription status')
+    with control_conn() as c:c.execute("""INSERT INTO tenant_subscriptions(tenant_id,plan_id,status,starts_on,renews_on,employee_limit_override) VALUES(?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET plan_id=excluded.plan_id,status=excluded.status,renews_on=excluded.renews_on,employee_limit_override=excluded.employee_limit_override""",(tenant_id,plan_id,status,date.today().isoformat(),renews_on or None,employee_limit_override))
+    cloud_audit(u['username'],'UPDATE','subscription',tenant_id,status,tenant_id);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/identity-providers')
+def identity_provider_create(request:Request,tenant_id:int=Form(...),provider_type:str=Form(...),name:str=Form(...),issuer:str=Form(''),client_id:str=Form(''),metadata_url:str=Form(''),enabled:int=Form(0)):
+    u=require_platform_admin(request)
+    if provider_type not in ['OIDC','SAML']:raise HTTPException(400,'Provider must be OIDC or SAML')
+    with control_conn() as c:iid=c.execute('INSERT INTO identity_providers(tenant_id,provider_type,name,issuer,client_id,metadata_url,enabled,configuration_status) VALUES(?,?,?,?,?,?,?,?)',(tenant_id,provider_type,name,issuer or None,client_id or None,metadata_url or None,int(bool(enabled)),'Configured' if issuer and (client_id or metadata_url) else 'Draft')).lastrowid
+    cloud_audit(u['username'],'CREATE','identity_provider',iid,provider_type,tenant_id);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/scim-tokens')
+def scim_token_create(request:Request,tenant_id:int=Form(...),name:str=Form(...)):
+    u=require_platform_admin(request);plain,digest,prefix=issue_scim_token()
+    with control_conn() as c:cid=c.execute('INSERT INTO scim_credentials(tenant_id,name,token_hash,token_prefix) VALUES(?,?,?,?)',(tenant_id,name,digest,prefix)).lastrowid
+    cloud_audit(u['username'],'CREATE','scim_credential',cid,prefix,tenant_id);return page(request,'scim_token.html',token=plain,token_name=name)
+
+@app.post('/scim/v2/Users')
+async def scim_user_create(request:Request):
+    authorization=request.headers.get('authorization','')
+    if not authorization.startswith('Bearer '):raise HTTPException(401,'SCIM bearer token required')
+    digest=hash_token(authorization[7:]);payload=await request.json()
+    with control_conn() as c:
+        cred=c.execute("SELECT * FROM scim_credentials WHERE token_hash=? AND status='Active'",(digest,)).fetchone()
+        if not cred:raise HTTPException(401,'Invalid SCIM token')
+        tenant=c.execute('SELECT * FROM tenants WHERE id=? AND status=?',(cred['tenant_id'],'Active')).fetchone();c.execute('UPDATE scim_credentials SET last_used_at=CURRENT_TIMESTAMP WHERE id=?',(cred['id'],))
+    username=(payload.get('userName') or '').strip()
+    if not username:raise HTTPException(400,'userName is required')
+    role=payload.get('role','employee')
+    if role not in ['employee','manager','hr','recruiter','payroll']:raise HTTPException(400,'SCIM role is not allowed')
+    active=1 if payload.get('active',True) else 0;context=set_tenant(tenant['slug'])
+    try:
+        init_db();existing=q('SELECT id FROM users WHERE username=?',(username,),True)
+        if existing:execq('UPDATE users SET role=?,active=? WHERE id=?',(role,active,existing['id']));uid=existing['id']
+        else:uid=execq('INSERT INTO users(username,password_hash,role,active) VALUES(?,?,?,?)',(username,hash_password(secrets.token_urlsafe(32)),role,active))
+    finally:reset_tenant(context)
+    cloud_audit('scim','PROVISION','user',uid,username,tenant['id']);return {'schemas':['urn:ietf:params:scim:schemas:core:2.0:User'],'id':str(uid),'userName':username,'active':bool(active)}
+
+@app.post('/cloud/storage/{tenant_id}')
+def storage_config_update(tenant_id:int,request:Request,backend:str=Form('Local'),bucket:str=Form(''),prefix:str=Form(''),region:str=Form(''),encryption_required:int=Form(1)):
+    u=require_platform_admin(request)
+    if backend not in ['Local','S3','Object Storage']:raise HTTPException(400,'Unsupported storage backend')
+    status='Active' if backend=='Local' or bucket else 'Draft'
+    with control_conn() as c:c.execute("""INSERT INTO storage_configurations(tenant_id,backend,bucket,prefix,region,encryption_required,status) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET backend=excluded.backend,bucket=excluded.bucket,prefix=excluded.prefix,region=excluded.region,encryption_required=excluded.encryption_required,status=excluded.status""",(tenant_id,backend,bucket or None,prefix or None,region or None,int(bool(encryption_required)),status))
+    cloud_audit(u['username'],'UPDATE','storage_configuration',tenant_id,backend,tenant_id);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/backups/policies/{tenant_id}')
+def backup_policy_update(tenant_id:int,request:Request,frequency:str=Form('Daily'),retention_days:int=Form(30),pitr_enabled:int=Form(0),rpo_minutes:int=Form(1440),rto_minutes:int=Form(240)):
+    u=require_platform_admin(request)
+    with control_conn() as c:c.execute("""INSERT INTO backup_policies(tenant_id,frequency,retention_days,pitr_enabled,rpo_minutes,rto_minutes,status) VALUES(?,?,?,?,?,?,'Active') ON CONFLICT(tenant_id) DO UPDATE SET frequency=excluded.frequency,retention_days=excluded.retention_days,pitr_enabled=excluded.pitr_enabled,rpo_minutes=excluded.rpo_minutes,rto_minutes=excluded.rto_minutes,status='Active'""",(tenant_id,frequency,max(1,retention_days),int(bool(pitr_enabled)),max(1,rpo_minutes),max(1,rto_minutes)))
+    cloud_audit(u['username'],'UPDATE','backup_policy',tenant_id,frequency,tenant_id);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/backups/run/{tenant_id}')
+def backup_run(tenant_id:int,request:Request,backup_type:str=Form('Full')):
+    u=require_platform_admin(request)
+    with control_conn() as c:
+        tenant=c.execute('SELECT * FROM tenants WHERE id=?',(tenant_id,)).fetchone()
+        if not tenant:raise HTTPException(404,'Tenant not found')
+        run_id=c.execute("INSERT INTO backup_runs(tenant_id,backup_type,status) VALUES(?,?,'Running')",(tenant_id,backup_type)).lastrowid
+    try:
+        if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql'):
+            location='managed-postgresql://pitr-requested';size=0
+        else:
+            source=tenant_db_path(tenant['slug']);target=BASE/'backups'/tenant['slug']/(datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')+'.db');target.parent.mkdir(parents=True,exist_ok=True)
+            if not source.exists():raise FileNotFoundError('Tenant database does not exist')
+            src=sqlite3.connect(source);dst=sqlite3.connect(target)
+            try:src.backup(dst)
+            finally:src.close();dst.close()
+            location=str(target);size=target.stat().st_size
+        with control_conn() as c:c.execute("UPDATE backup_runs SET status='Completed',location=?,size_bytes=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(location,size,run_id))
+        cloud_audit(u['username'],'RUN','backup',run_id,backup_type,tenant_id)
+    except Exception as e:
+        with control_conn() as c:c.execute("UPDATE backup_runs SET status='Failed',error=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(str(e),run_id))
+        raise HTTPException(500,'Backup failed')
+    return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/migrations')
+def migration_create(request:Request,tenant_id:int=Form(...),source_path:str=Form(...)):
+    u=require_platform_admin(request);source=Path(source_path).resolve();data_root=(BASE/'data').resolve()
+    if source.suffix.lower()!='.db' or data_root not in source.parents:raise HTTPException(400,'Migration source must be a SQLite .db file inside the PeaWork data directory')
+    if not source.exists():raise HTTPException(404,'Migration source database not found')
+    source_conn=sqlite3.connect(source);source_conn.row_factory=sqlite3.Row
+    try:
+        tables=[x['name'] for x in source_conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
+        counts={name:source_conn.execute(f'SELECT COUNT(*) n FROM "{name}"').fetchone()['n'] for name in tables}
+        preflight={'tables':len(tables),'records':sum(counts.values()),'counts':counts,'source_bytes':source.stat().st_size}
+    finally:source_conn.close()
+    with control_conn() as c:mid=c.execute("INSERT INTO migration_jobs(tenant_id,source_path,status,preflight_json) VALUES(?,?,'Preflight Complete',?)",(tenant_id,str(source),json.dumps(preflight))).lastrowid
+    cloud_audit(u['username'],'PREFLIGHT','migration',mid,f"{preflight['records']} records",tenant_id);return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/migrations/{mid}/run')
+def migration_run(mid:int,request:Request,confirm:str=Form(...)):
+    u=require_platform_admin(request)
+    if confirm!='MIGRATE':raise HTTPException(400,'Type MIGRATE to confirm')
+    with control_conn() as c:
+        job=c.execute('SELECT m.*,t.slug FROM migration_jobs m JOIN tenants t ON t.id=m.tenant_id WHERE m.id=?',(mid,)).fetchone()
+        if not job or job['status']!='Preflight Complete':raise HTTPException(400,'Migration is not ready')
+        c.execute("UPDATE migration_jobs SET status='Running',started_at=CURRENT_TIMESTAMP WHERE id=?",(mid,))
+    source=Path(job['source_path']);destination=tenant_db_path(job['slug'])
+    try:
+        if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql'):
+            src=sqlite3.connect(source);src.row_factory=sqlite3.Row;context=set_tenant(job['slug'])
+            try:
+                init_db();tables=[x['name'] for x in src.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
+                with conn() as target:
+                    for table in reversed(tables):target.execute(f'DELETE FROM "{table}"')
+                    for table in tables:
+                        columns=[x['name'] for x in src.execute(f'PRAGMA table_info("{table}")').fetchall()]
+                        column_sql=','.join(f'"{x}"' for x in columns);placeholders=','.join('?' for _ in columns)
+                        for row in src.execute(f'SELECT * FROM "{table}"').fetchall():target.execute(f'INSERT INTO "{table}" ({column_sql}) VALUES ({placeholders})',tuple(row[x] for x in columns))
+                        if 'id' in columns:target.execute(f"SELECT setval(pg_get_serial_sequence('{table}','id'),COALESCE(MAX(id),1),MAX(id) IS NOT NULL) FROM \"{table}\"")
+            finally:src.close();reset_tenant(context)
+        else:
+            if source.resolve()==destination.resolve():raise ValueError('Source and destination databases are the same')
+            destination.parent.mkdir(parents=True,exist_ok=True);src=sqlite3.connect(source);dst=sqlite3.connect(destination)
+            try:src.backup(dst)
+            finally:src.close();dst.close()
+            context=set_tenant(job['slug'])
+            try:init_db()
+            finally:reset_tenant(context)
+        info=json.loads(job['preflight_json']);records=info['records']
+        with control_conn() as c:c.execute("UPDATE migration_jobs SET status='Completed',records_migrated=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(records,mid))
+        cloud_audit(u['username'],'COMPLETE','migration',mid,f'{records} records',job['tenant_id'])
+    except Exception as e:
+        with control_conn() as c:c.execute("UPDATE migration_jobs SET status='Failed',error=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(str(e),mid))
+        raise HTTPException(500,'Migration failed')
+    return RedirectResponse('/cloud',303)
+
+@app.post('/cloud/health-checks')
+def cloud_health_checks(request:Request,tenant_id:int|None=Form(None)):
+    u=require_platform_admin(request);checks=[];started=time.perf_counter()
+    try:init_control_db();checks.append(('control_database','Healthy',(time.perf_counter()-started)*1000,'Control database reachable'))
+    except Exception as e:checks.append(('control_database','Unhealthy',None,str(e)))
+    tenants=[]
+    with control_conn() as c:tenants=c.execute('SELECT * FROM tenants WHERE id=?',(tenant_id,)).fetchall() if tenant_id else c.execute("SELECT * FROM tenants WHERE status='Active'").fetchall()
+    for tenant in tenants:
+        token=set_tenant(tenant['slug']);tick=time.perf_counter()
+        try:q('SELECT 1 ok',one=True);checks.append((f"tenant_database:{tenant['slug']}",'Healthy',(time.perf_counter()-tick)*1000,'Tenant database reachable'))
+        except Exception as e:checks.append((f"tenant_database:{tenant['slug']}",'Unhealthy',None,str(e)))
+        finally:reset_tenant(token)
+    with control_conn() as c:
+        for service,status,latency,details in checks:c.execute('INSERT INTO service_checks(tenant_id,service,status,latency_ms,details) VALUES(?,?,?,?,?)',(tenant_id,service,status,latency,details))
+    cloud_audit(u['username'],'RUN','health_checks','',f'{len(checks)} checks',tenant_id);return RedirectResponse('/cloud',303)
+
+@app.get('/metrics')
+def metrics():
+    init_control_db()
+    with control_conn() as c:
+        tenants=c.execute("SELECT COUNT(*) n FROM tenants WHERE status='Active'").fetchone()['n'];failed=c.execute("SELECT COUNT(*) n FROM backup_runs WHERE status='Failed'").fetchone()['n'];migrations=c.execute("SELECT COUNT(*) n FROM migration_jobs WHERE status IN ('Running','Failed')").fetchone()['n']
+    body=f"peawork_active_tenants {tenants}\npeawork_failed_backups {failed}\npeawork_migration_attention {migrations}\n"
+    return StreamingResponse(iter([body]),media_type='text/plain')
+
+@app.get('/api/v1/cloud/tenants')
+def api_cloud_tenants(request:Request): require_platform_admin(request);return cloud_context()['tenants']
+@app.get('/api/v1/cloud/service-checks')
+def api_cloud_checks(request:Request): require_platform_admin(request);return cloud_context()['checks']
+
+@app.get('/cloud/return-control')
+def cloud_return_control():
+    r=RedirectResponse('/login',303);r.delete_cookie('peawork_tenant');r.delete_cookie('peawork_session');return r

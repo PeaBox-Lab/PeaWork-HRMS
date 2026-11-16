@@ -17,3 +17,16 @@
 - India DPDP notice, purpose, retention, correction/access, grievance and breach workflows validated by counsel.    
 - Restore drills with measured RPO/RTO.    
 This repository is a functional MVP, not a compliance certification.
+
+
+## v0.6 cloud security controls
+- Tenant binding in signed session tokens prevents cross-tenant session replay.
+- Control-plane administration is restricted to the local control tenant.
+- Tenant data uses separate database files or PostgreSQL schemas.
+- SCIM credentials are random, displayed once and stored as SHA-256 hashes.
+- SCIM role assignment is allow-listed and cannot provision platform-admin access.
+- Tenant switching clears the prior session.
+- Cloud cookies use the Secure flag when `PEAWORK_ENV` begins with `cloud`.
+- Object-storage keys include the tenant prefix and request server-side encryption.
+
+These controls do not replace production threat modeling, secret-vault integration, network isolation, row/schema authorization testing, federation signature validation, rate limiting, centralized audit or penetration testing.

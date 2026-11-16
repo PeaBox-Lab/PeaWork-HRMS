@@ -1,11 +1,21 @@
-# PeaWork v0.5.0  
-India-first HRIS for 50–2,000 employee organizations. v0.5 adds a validation-gated India payroll beta to the delivered people, hire-to-onboard, workforce and talent foundation while keeping one FastAPI/Jinja application core for local, Docker and future cloud deployment.  
+# PeaWork v0.6.0  
+India-first HRIS for 50–2,000 employee organizations. v0.6 adds a tenant-isolated cloud beta to the delivered people, hire-to-onboard, workforce, talent and payroll foundation while preserving local operation.  
 ## Included  
 ### HR foundation  
 - Secure login, PBKDF2 password hashing, role-based access and audit events  
 - Employee master, effective-dated hire history, departments, positions and manager relationships  
 - Leave requests and approvals, India holiday calendar, document register and CSV export  
 - Operational dashboard, reports, REST API, SQLite local mode and Docker local-server mode  
+### v0.6 Cloud beta
+- Separate cloud control plane and cloud audit trail
+- Database-per-tenant SQLite and schema-per-tenant PostgreSQL isolation
+- Tenant-bound sessions, subscription limits and custom-domain state
+- OIDC/SAML configuration and hashed one-time SCIM provisioning tokens
+- Tenant-prefixed local or S3-compatible object storage
+- Health checks, metrics, backup/PITR policies and backup history
+- Local SQLite preflight and migration into SQLite or PostgreSQL tenant targets
+- Cloud Compose, environment template and deployment preflight scripts
+
 ### v0.5 India payroll beta
 - Configurable earnings, deductions, reimbursements and employer costs
 - Effective-dated salary structures and employee compensation
@@ -93,5 +103,21 @@ Interactive documentation: `/docs`
 - `GET /api/v1/development-plans`
 - `GET /api/v1/payroll-periods`
 - `GET /api/v1/payroll-runs`
-- `GET /api/v1/payslips`  
-See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`.
+- `GET /api/v1/payslips`
+- `GET /api/v1/cloud/tenants`
+- `GET /api/v1/cloud/service-checks`
+- `POST /scim/v2/Users`
+- `GET /metrics`  
+See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`, and `docs/V06_CLOUD_BETA.md`.
+
+
+## Cloud beta quick start
+
+```bash
+cp .env.cloud.example .env
+# Replace every placeholder secret in .env
+docker compose -f docker-compose.cloud.yml up -d --build
+python scripts/create_object_bucket.py
+```
+
+Run `python scripts/cloud_preflight.py` in the configured application environment before opening cloud access. The cloud beta records SSO, domain, TLS and PITR orchestration state but requires provider integration and independent validation before production use.

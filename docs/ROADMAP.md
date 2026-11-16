@@ -9,8 +9,8 @@ Attendance, shifts, weekly offs, overtime, timesheets, biometric import/API, lea
 Goals/OKRs, performance cycles, check-ins, 360 feedback, skills, competencies, development plans and calibration. Delivered in v0.4.0 as the complete functional MVP workflow.    
 ## v0.5 India payroll beta, delivered    
 Salary structures, earnings/deductions, attendance inputs, arrears, reimbursements, payroll preview, variance checks, payslips and accounting export. Delivered in v0.5.0 as a validation-gated beta; statutory implementation still requires specialist approval and production golden cases.    
-## v0.6 Cloud beta, 8   12 weeks    
-Tenant isolation, PostgreSQL, object storage, subscriptions, custom domains, SSO, SCIM, monitoring, backup/PITR and migration assistant from Local.    
+## v0.6 Cloud beta, delivered    
+Tenant isolation, PostgreSQL, object storage, subscriptions, custom domains, SSO/SCIM configuration, monitoring, backup/PITR controls and a Local migration assistant. Delivered in v0.6.0 as a cloud beta with documented provider-integration gates.    
 ## v1.0 production hardening, 6   8 weeks    
 OWASP ASVS Level 2 verification, penetration test, accessibility, localization, disaster-recovery exercise, load testing to agreed concurrency, data retention and DPDP workflows.    
 ## Later    
