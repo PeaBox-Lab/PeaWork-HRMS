@@ -1,14 +1,17 @@
 # Changelog
 
-## 0.1.0 - 2026-11-16
+## 0.2.0 - Hire-to-onboard
+- Added requisitions, candidates and candidate-to-requisition applications.
+- Added controlled recruitment stages, interviews, scorecards and recommendations.
+- Added offer issuance, response status and accepted-offer handoff.
+- Added configurable onboarding journeys and relative-date task templates.
+- Added generated onboarding task plans, ownership, blockers and completion tracking.
+- Added probation review scheduling and recommendations.
+- Added transactional candidate-to-employee conversion and effective-dated HIRE history.
+- Added recruiter role, navigation, dashboard metrics and authenticated v0.2 APIs.
+- Added end-to-end workflow tests and v0.2 operating documentation.
 
-Initial PeaWork foundation release.
-
-### Added
-- Local HRIS web application and Docker server package.
-- Employee, organization, position, leave, holiday, document, report and audit modules.
-- Effective-dated hire history.
-- Role-aware navigation and protected actions.
-- REST API with OpenAPI documentation.
-- Demo India dataset and automated workflow tests.
-- Architecture, security, product requirements and future roadmap documentation.
+## 0.1.0 - Foundation
+- People master, organization and positions.
+- Effective-dated hire event, leave workflow and document register.
+- Dashboard, reports, API, RBAC basics, audit, SQLite and Docker.
