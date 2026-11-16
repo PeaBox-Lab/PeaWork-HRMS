@@ -514,6 +514,14 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_events_employee_date ON employee_events(employee_id,effective_date);
     CREATE INDEX IF NOT EXISTS idx_journey_tasks_due ON employee_journey_tasks(due_date,status);
     CREATE INDEX IF NOT EXISTS idx_offboarding_tasks_due ON offboarding_tasks(due_date,status);
+    CREATE TABLE IF NOT EXISTS employee_change_requests(id INTEGER PRIMARY KEY,employee_id INTEGER NOT NULL,request_type TEXT NOT NULL,field_name TEXT NOT NULL,old_value TEXT,new_value TEXT NOT NULL,reason TEXT,status TEXT DEFAULT 'Pending',reviewer_user_id INTEGER,reviewer_comment TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,decided_at TEXT);
+    CREATE TABLE IF NOT EXISTS employee_acknowledgements(id INTEGER PRIMARY KEY,employee_id INTEGER NOT NULL,document_id INTEGER,title TEXT NOT NULL,version TEXT,acknowledged_at TEXT,ip TEXT,UNIQUE(employee_id,document_id,version));
+    CREATE TABLE IF NOT EXISTS notification_preferences(id INTEGER PRIMARY KEY,user_id INTEGER UNIQUE NOT NULL,email_enabled INTEGER DEFAULT 1,in_app_enabled INTEGER DEFAULT 1,push_enabled INTEGER DEFAULT 0,digest_frequency TEXT DEFAULT 'Daily',quiet_start TEXT,quiet_end TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS employee_requests(id INTEGER PRIMARY KEY,employee_id INTEGER NOT NULL,request_type TEXT NOT NULL,title TEXT NOT NULL,details TEXT,status TEXT DEFAULT 'Open',owner_role TEXT DEFAULT 'hr',owner_user_id INTEGER,due_date TEXT,resolution TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT);
+    CREATE TABLE IF NOT EXISTS inbox_items(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,item_type TEXT NOT NULL,source_entity_type TEXT,source_entity_id TEXT,title TEXT NOT NULL,subtitle TEXT,link TEXT,due_date TEXT,priority TEXT DEFAULT 'Normal',status TEXT DEFAULT 'Open',created_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT,UNIQUE(user_id,item_type,source_entity_type,source_entity_id));
+    CREATE INDEX IF NOT EXISTS idx_change_requests_status ON employee_change_requests(status,created_at);
+    CREATE INDEX IF NOT EXISTS idx_employee_requests_status ON employee_requests(status,due_date);
+    CREATE INDEX IF NOT EXISTS idx_inbox_user_status ON inbox_items(user_id,status,due_date);
     """
     if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql'):
         schema=re.sub(r'INTEGER PRIMARY KEY','BIGSERIAL PRIMARY KEY',schema)

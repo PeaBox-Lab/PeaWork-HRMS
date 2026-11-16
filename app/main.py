@@ -12,7 +12,7 @@ from .cloud_control import control_conn,init_control_db,clean_slug,issue_scim_to
 from .storage import store_upload
 from .i18n import translate    
 BASE=Path(__file__).resolve().parent.parent; UPLOADS=BASE/'uploads'; UPLOADS.mkdir(exist_ok=True)    
-app=FastAPI(title='PeaWork HRIS',version='1.1.0',description='India-first production-readiness candidate HRIS')    
+app=FastAPI(title='PeaWork HRIS',version='1.2.0',description='India-first production-readiness candidate HRIS')    
 app.mount('/static',StaticFiles(directory=BASE/'app'/'static'),name='static'); templates=Jinja2Templates(directory=BASE/'app'/'templates')
 SAFE_METHODS={'GET','HEAD','OPTIONS'}
 CSRF_EXEMPT={'/scim/v2/Users','/metrics','/health'}
@@ -163,13 +163,13 @@ def seed():
     journey=execq('INSERT INTO journey_definitions(code,name,journey_type,country_code) VALUES(?,?,?,?)',('ONBOARD-IN','India Standard Onboarding','Onboarding','IN'))
     for title,category,owner,offset,evidence in [('Collect identity and statutory documents','Compliance','hr',-7,1),('Prepare equipment and access','IT','admin',-3,1),('Manager welcome and 30-day goals','Manager','manager',1,0)]: execq('INSERT INTO journey_task_templates(journey_id,title,category,owner_role,due_offset_days,completion_evidence_required) VALUES(?,?,?,?,?,?)',(journey,title,category,owner,offset,evidence))
     for title,category,owner,offset,evidence in [('Disable application access','Access','admin',0,1),('Recover company assets','Assets','hr',0,1),('Complete knowledge transfer','Handover','manager',-3,1),('Confirm final payroll inputs','Payroll','payroll',0,1),('Conduct exit interview','Exit Interview','hr',-2,0)]: execq('INSERT INTO offboarding_task_templates(title,category,owner_role,due_offset_days,evidence_required) VALUES(?,?,?,?,?)',(title,category,owner,offset,evidence))
-    audit('system','SEED','database','','Demo organization initialized through v1.1 global core HR')    
+    audit('system','SEED','database','','Demo organization initialized through v1.2 employee experience')    
 @app.exception_handler(401)    
 async def unauthorized(request,exc): return RedirectResponse('/login?error=Please+sign+in',303)    
 @app.exception_handler(403)    
 async def forbidden(request,exc): return page(request,'error.html',code=403,message='You do not have access to this action.')    
 @app.get('/health')
-def health(): return {'status':'ok','version':'1.1.0','deployment':os.getenv('PEAWORK_ENV','local'),'tenant':current_tenant(),'database':'postgresql' if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql') else 'sqlite','storage':os.getenv('PEAWORK_STORAGE_BACKEND','configured')}
+def health(): return {'status':'ok','version':'1.2.0','deployment':os.getenv('PEAWORK_ENV','local'),'tenant':current_tenant(),'database':'postgresql' if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql') else 'sqlite','storage':os.getenv('PEAWORK_STORAGE_BACKEND','configured')}
 @app.get('/login',response_class=HTMLResponse)    
 def login_page(request:Request,error:str=''): return page(request,'login.html',error=error)    
 @app.post('/login')
@@ -194,7 +194,7 @@ def logout(request:Request):
 @app.get('/',response_class=HTMLResponse)    
 def dashboard(request:Request):    
     u=require(request)    
-    stats={'employees':q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n'],'departments':q('SELECT COUNT(*) n FROM departments WHERE active=1',one=True)['n'],'pending':q("SELECT COUNT(*) n FROM leave_requests WHERE status='Pending'",one=True)['n'],'documents':q('SELECT COUNT(*) n FROM documents',one=True)['n'],'open_requisitions':q("SELECT COUNT(*) n FROM requisitions WHERE status='Open'",one=True)['n'],'active_candidates':q("SELECT COUNT(*) n FROM applications WHERE status='Active'",one=True)['n'],'onboarding':q("SELECT COUNT(*) n FROM onboardings WHERE status IN ('Planned','In Progress')",one=True)['n'],'present_today':q("SELECT COUNT(*) n FROM attendance_records WHERE attendance_date=? AND status IN ('Present','Late','Half Day')",(date.today().isoformat(),),True)['n'],'pending_timesheets':q("SELECT COUNT(*) n FROM timesheets WHERE status='Submitted'",one=True)['n'],'active_cycles':q("SELECT COUNT(*) n FROM performance_cycles WHERE status='Active'",one=True)['n'],'goals_at_risk':q("SELECT COUNT(*) n FROM goals WHERE status='At Risk'",one=True)['n'],'feedback_due':q("SELECT COUNT(*) n FROM feedback_requests WHERE status='Requested'",one=True)['n'],'open_payroll':q("SELECT COUNT(*) n FROM payroll_periods WHERE status IN ('Open','Processing')",one=True)['n'],'payroll_errors':q("SELECT COUNT(*) n FROM payroll_runs WHERE validation_errors IS NOT NULL AND validation_errors!=''",one=True)['n'],'pending_transfers':q("SELECT COUNT(*) n FROM employee_transfers WHERE status='Pending Approval'",one=True)['n'],'active_journeys':q("SELECT COUNT(*) n FROM employee_journeys WHERE status IN ('Planned','In Progress')",one=True)['n'],'offboarding_open':q("SELECT COUNT(*) n FROM offboarding_cases WHERE status NOT IN ('Completed','Cancelled')",one=True)['n']}    
+    stats={'employees':q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n'],'departments':q('SELECT COUNT(*) n FROM departments WHERE active=1',one=True)['n'],'pending':q("SELECT COUNT(*) n FROM leave_requests WHERE status='Pending'",one=True)['n'],'documents':q('SELECT COUNT(*) n FROM documents',one=True)['n'],'open_requisitions':q("SELECT COUNT(*) n FROM requisitions WHERE status='Open'",one=True)['n'],'active_candidates':q("SELECT COUNT(*) n FROM applications WHERE status='Active'",one=True)['n'],'onboarding':q("SELECT COUNT(*) n FROM onboardings WHERE status IN ('Planned','In Progress')",one=True)['n'],'present_today':q("SELECT COUNT(*) n FROM attendance_records WHERE attendance_date=? AND status IN ('Present','Late','Half Day')",(date.today().isoformat(),),True)['n'],'pending_timesheets':q("SELECT COUNT(*) n FROM timesheets WHERE status='Submitted'",one=True)['n'],'active_cycles':q("SELECT COUNT(*) n FROM performance_cycles WHERE status='Active'",one=True)['n'],'goals_at_risk':q("SELECT COUNT(*) n FROM goals WHERE status='At Risk'",one=True)['n'],'feedback_due':q("SELECT COUNT(*) n FROM feedback_requests WHERE status='Requested'",one=True)['n'],'open_payroll':q("SELECT COUNT(*) n FROM payroll_periods WHERE status IN ('Open','Processing')",one=True)['n'],'payroll_errors':q("SELECT COUNT(*) n FROM payroll_runs WHERE validation_errors IS NOT NULL AND validation_errors!=''",one=True)['n'],'pending_transfers':q("SELECT COUNT(*) n FROM employee_transfers WHERE status='Pending Approval'",one=True)['n'],'active_journeys':q("SELECT COUNT(*) n FROM employee_journeys WHERE status IN ('Planned','In Progress')",one=True)['n'],'offboarding_open':q("SELECT COUNT(*) n FROM offboarding_cases WHERE status NOT IN ('Completed','Cancelled')",one=True)['n'],'my_inbox':q("SELECT COUNT(*) n FROM inbox_items WHERE user_id=? AND status='Open'",(u['id'],),True)['n'],'profile_changes':q("SELECT COUNT(*) n FROM employee_change_requests WHERE status='Pending'",one=True)['n']}    
     recent=q('SELECT e.employee_no,e.first_name,e.last_name,d.name department,e.date_of_joining FROM employees e LEFT JOIN departments d ON d.id=e.department_id ORDER BY e.id DESC LIMIT 6')    
     leaves=q("SELECT l.id,e.first_name||' '||e.last_name employee,t.name type,l.start_date,l.end_date,l.days,l.status FROM leave_requests l JOIN employees e ON e.id=l.employee_id JOIN leave_types t ON t.id=l.leave_type_id ORDER BY l.id DESC LIMIT 6")    
     return page(request,'dashboard.html',stats=stats,recent=recent,leaves=leaves)    
@@ -1785,3 +1785,74 @@ def offboarding_complete(cid:int,request:Request):
 def api_core_journeys(request:Request):require(request);return q('SELECT * FROM employee_journeys ORDER BY id DESC')
 @app.get('/api/v1/core-hr/offboarding')
 def api_core_offboarding(request:Request):require(request,CORE_HR_ROLES);return q('SELECT * FROM offboarding_cases ORDER BY id DESC')
+
+# ------------------------- v1.2 Employee Experience -------------------------
+def ensure_preferences(user_id):
+ execq("INSERT INTO notification_preferences(user_id) VALUES(?) ON CONFLICT(user_id) DO NOTHING",(user_id,))
+def sync_inbox(u):
+ uid=u['id'];emp=u.get('employee_id');items=[]
+ if emp:
+  for x in q("SELECT t.id,t.title,t.due_date,t.status FROM employee_journey_tasks t JOIN employee_journeys j ON j.id=t.employee_journey_id WHERE j.employee_id=? AND t.status NOT IN ('Completed','Waived')",(emp,)):items.append(('Journey Task','employee_journey_task',x['id'],x['title'],'Lifecycle task','/lifecycle',x['due_date'],'Normal'))
+  for x in q("SELECT t.id,t.title,t.due_date,t.status FROM offboarding_tasks t JOIN offboarding_cases c ON c.id=t.case_id WHERE c.employee_id=? AND t.status NOT IN ('Completed','Waived')",(emp,)):items.append(('Offboarding Task','offboarding_task',x['id'],x['title'],'Offboarding clearance','/lifecycle',x['due_date'],'High'))
+ if u['role'] in ['admin','hr','manager']:
+  for x in q("SELECT id,employee_id,start_date,end_date FROM leave_requests WHERE status='Pending'"):items.append(('Approval','leave_request',x['id'],f"Leave request #{x['id']}",f"{x['start_date']} to {x['end_date']}",'/leave',None,'High'))
+  for x in q("SELECT id,employee_id,week_start FROM timesheets WHERE status='Submitted'"):items.append(('Approval','timesheet',x['id'],f"Timesheet week {x['week_start']}",'Submitted for approval','/workforce',None,'High'))
+ if u['role'] in ['admin','hr']:
+  for x in q("SELECT id,employee_id,field_name FROM employee_change_requests WHERE status='Pending'"):items.append(('Approval','change_request',x['id'],f"Profile change: {x['field_name']}",f"Employee #{x['employee_id']}",'/experience',None,'Normal'))
+ for item in items:execq("INSERT INTO inbox_items(user_id,item_type,source_entity_type,source_entity_id,title,subtitle,link,due_date,priority) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,item_type,source_entity_type,source_entity_id) DO UPDATE SET title=excluded.title,subtitle=excluded.subtitle,link=excluded.link,due_date=excluded.due_date,priority=excluded.priority,status='Open',completed_at=NULL",(uid,*item))
+ return q("SELECT * FROM inbox_items WHERE user_id=? ORDER BY CASE priority WHEN 'High' THEN 1 ELSE 2 END,COALESCE(due_date,'9999-12-31'),id DESC",(uid,))
+def experience_context(u):
+ ensure_preferences(u['id']);sync_inbox(u);emp=u.get('employee_id')
+ return {'employee':q("""SELECT e.*,g.global_employee_id,g.preferred_name,g.personal_email,g.primary_language,g.emergency_contact_name,g.emergency_contact_phone,a.assignment_no,l.name legal_entity,w.name work_location,d.name department,c.name cost_center,p.name project,j.title job_profile,m.first_name||' '||m.last_name manager FROM employees e LEFT JOIN employee_global_profiles g ON g.employee_id=e.id LEFT JOIN employee_assignments a ON a.employee_id=e.id AND a.assignment_status='Active' AND a.effective_to IS NULL LEFT JOIN legal_entities l ON l.id=a.legal_entity_id LEFT JOIN work_locations w ON w.id=a.location_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN cost_centers c ON c.id=a.cost_center_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN job_profiles j ON j.id=a.job_profile_id LEFT JOIN employees m ON m.id=a.manager_id WHERE e.id=?""",(emp,),True) if emp else None,'changes':q('SELECT * FROM employee_change_requests WHERE employee_id=? ORDER BY id DESC',(emp,)) if emp else [],'requests':q('SELECT * FROM employee_requests WHERE employee_id=? ORDER BY id DESC',(emp,)) if emp else [],'documents':q('SELECT * FROM documents WHERE employee_id=? ORDER BY id DESC',(emp,)) if emp else [],'acknowledgements':q('SELECT * FROM employee_acknowledgements WHERE employee_id=? ORDER BY id DESC',(emp,)) if emp else [],'preferences':q('SELECT * FROM notification_preferences WHERE user_id=?',(u['id'],),True),'inbox':q("SELECT * FROM inbox_items WHERE user_id=? AND status='Open' ORDER BY CASE priority WHEN 'High' THEN 1 ELSE 2 END,COALESCE(due_date,'9999-12-31')",(u['id'],)),'notifications_all':q('SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 100',(u['id'],)),'pending_changes':q("SELECT c.*,e.first_name||' '||e.last_name employee FROM employee_change_requests c JOIN employees e ON e.id=c.employee_id WHERE c.status='Pending' ORDER BY c.id") if u['role'] in ['admin','hr'] else [],'service_requests':q("SELECT r.*,e.first_name||' '||e.last_name employee FROM employee_requests r JOIN employees e ON e.id=r.employee_id WHERE r.status!='Completed' ORDER BY r.due_date,r.id") if u['role'] in ['admin','hr'] else []}
+@app.get('/experience',response_class=HTMLResponse)
+def experience(request:Request):u=require(request);return page(request,'experience.html',**experience_context(u))
+@app.post('/experience/profile-change')
+def profile_change(request:Request,field_name:str=Form(...),new_value:str=Form(...),reason:str=Form('')):
+ u=require(request);allowed={'phone','personal_email','preferred_name','emergency_contact_name','emergency_contact_phone','primary_language'}
+ if field_name not in allowed or not u.get('employee_id'):raise HTTPException(400,'Unsupported profile field')
+ old='';profile=q('SELECT * FROM employee_global_profiles WHERE employee_id=?',(u['employee_id'],),True);employee=q('SELECT * FROM employees WHERE id=?',(u['employee_id'],),True)
+ old=(employee or {}).get(field_name) if field_name=='phone' else (profile or {}).get(field_name)
+ cid=execq('INSERT INTO employee_change_requests(employee_id,request_type,field_name,old_value,new_value,reason) VALUES(?,\'Profile Change\',?,?,?,?)',(u['employee_id'],field_name,old,new_value,reason));audit(u['username'],'REQUEST','employee_change',cid,field_name);return RedirectResponse('/experience',303)
+@app.post('/experience/profile-change/{cid}/decision')
+def profile_change_decision(cid:int,request:Request,decision:str=Form(...),comment:str=Form('')):
+ u=require(request,['admin','hr']);change=q('SELECT * FROM employee_change_requests WHERE id=?',(cid,),True)
+ if not change or change['status']!='Pending':raise HTTPException(400,'Change is not pending')
+ if decision!='approve':execq("UPDATE employee_change_requests SET status='Rejected',reviewer_user_id=?,reviewer_comment=?,decided_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],comment,cid));return RedirectResponse('/experience',303)
+ if change['field_name']=='phone':execq('UPDATE employees SET phone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(change['new_value'],change['employee_id']))
+ else:execq(f"UPDATE employee_global_profiles SET {change['field_name']}=?,updated_at=CURRENT_TIMESTAMP WHERE employee_id=?",(change['new_value'],change['employee_id']))
+ execq("UPDATE employee_change_requests SET status='Approved',reviewer_user_id=?,reviewer_comment=?,decided_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],comment,cid));audit(u['username'],'APPROVE','employee_change',cid,change['field_name']);return RedirectResponse('/experience',303)
+@app.post('/experience/requests')
+def employee_request_create(request:Request,request_type:str=Form(...),title:str=Form(...),details:str=Form(''),due_date:str=Form('')):
+ u=require(request);rid=execq('INSERT INTO employee_requests(employee_id,request_type,title,details,due_date) VALUES(?,?,?,?,?)',(u['employee_id'],request_type,title,details,due_date or None));audit(u['username'],'CREATE','employee_request',rid,request_type);return RedirectResponse('/experience',303)
+@app.post('/experience/documents/{did}/acknowledge')
+def document_acknowledge(did:int,request:Request,version:str=Form('current')):
+ u=require(request);doc=q('SELECT * FROM documents WHERE id=? AND employee_id=?',(did,u['employee_id']),True)
+ if not doc:raise HTTPException(404,'Document not found')
+ execq('INSERT INTO employee_acknowledgements(employee_id,document_id,title,version,acknowledged_at,ip) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?) ON CONFLICT(employee_id,document_id,version) DO UPDATE SET acknowledged_at=CURRENT_TIMESTAMP,ip=excluded.ip',(u['employee_id'],did,doc['title'],version,request.client.host));audit(u['username'],'ACKNOWLEDGE','document',did,version);return RedirectResponse('/experience',303)
+@app.post('/experience/preferences')
+def preferences_update(request:Request,email_enabled:int=Form(0),in_app_enabled:int=Form(0),push_enabled:int=Form(0),digest_frequency:str=Form('Daily'),quiet_start:str=Form(''),quiet_end:str=Form('')):
+ u=require(request);ensure_preferences(u['id']);execq('UPDATE notification_preferences SET email_enabled=?,in_app_enabled=?,push_enabled=?,digest_frequency=?,quiet_start=?,quiet_end=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?',(int(bool(email_enabled)),int(bool(in_app_enabled)),int(bool(push_enabled)),digest_frequency,quiet_start or None,quiet_end or None,u['id']));return RedirectResponse('/experience',303)
+@app.post('/experience/inbox/{iid}/complete')
+def inbox_complete(iid:int,request:Request):
+ u=require(request);execq("UPDATE inbox_items SET status='Completed',completed_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?",(iid,u['id']));return RedirectResponse('/experience',303)
+
+def manager_context(u):
+ emp=u.get('employee_id');team=q("SELECT id,employee_no,first_name||' '||last_name name,status,department_id,position_id FROM employees WHERE manager_id=? ORDER BY first_name",(emp,)) if emp else []
+ ids=[x['id'] for x in team];calendar=[]
+ for member in team:
+  for x in q("SELECT start_date event_date,end_date,'Leave' event_type,status FROM leave_requests WHERE employee_id=? AND status IN ('Pending','Approved')",(member['id'],)):calendar.append({**x,'employee':member['name']})
+  for x in q("SELECT effective_date event_date,effective_date end_date,t.name event_type,x.event_status status FROM employee_events x JOIN lifecycle_event_types t ON t.id=x.event_type_id WHERE x.employee_id=?",(member['id'],)):calendar.append({**x,'employee':member['name']})
+ return {'team':team,'leave_approvals':q("SELECT l.*,e.first_name||' '||e.last_name employee,t.name type FROM leave_requests l JOIN employees e ON e.id=l.employee_id JOIN leave_types t ON t.id=l.leave_type_id WHERE e.manager_id=? AND l.status='Pending' ORDER BY l.id",(emp,)) if emp else [],'timesheet_approvals':q("SELECT t.*,e.first_name||' '||e.last_name employee,COALESCE((SELECT SUM(hours) FROM timesheet_entries x WHERE x.timesheet_id=t.id),0) hours FROM timesheets t JOIN employees e ON e.id=t.employee_id WHERE e.manager_id=? AND t.status='Submitted' ORDER BY t.week_start",(emp,)) if emp else [],'journey_tasks':q("SELECT t.*,e.first_name||' '||e.last_name employee,j.journey_type FROM employee_journey_tasks t JOIN employee_journeys j ON j.id=t.employee_journey_id JOIN employees e ON e.id=j.employee_id WHERE e.manager_id=? AND t.status NOT IN ('Completed','Waived') ORDER BY t.due_date",(emp,)) if emp else [],'calendar':sorted(calendar,key=lambda x:x['event_date'])}
+@app.get('/manager',response_class=HTMLResponse)
+def manager_workspace(request:Request):u=require(request,['admin','hr','manager']);return page(request,'manager.html',**manager_context(u))
+@app.get('/api/v1/experience/inbox')
+def api_experience_inbox(request:Request):u=require(request);sync_inbox(u);return q("SELECT * FROM inbox_items WHERE user_id=? AND status='Open' ORDER BY id DESC",(u['id'],))
+@app.get('/api/v1/experience/team-calendar')
+def api_team_calendar(request:Request):u=require(request,['admin','hr','manager']);return manager_context(u)['calendar']
+
+@app.post('/experience/requests/{rid}/resolve')
+def employee_request_resolve(rid:int,request:Request,resolution:str=Form(...)):
+ u=require(request,['admin','hr']);execq("UPDATE employee_requests SET status='Completed',owner_user_id=?,resolution=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],resolution,rid));audit(u['username'],'RESOLVE','employee_request',rid,resolution);return RedirectResponse('/experience',303)
+@app.post('/experience/notifications/{nid}/read')
+def notification_read(nid:int,request:Request):
+ u=require(request);execq('UPDATE notifications SET read_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?',(nid,u['id']));return RedirectResponse('/experience',303)

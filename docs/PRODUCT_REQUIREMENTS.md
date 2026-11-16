@@ -133,3 +133,19 @@ Payroll calculations, statutory filings, biometric devices, recruiting, performa
 14. Completed separation closes the assignment, inactivates the employee/user and records a lifecycle event.
 15. Core-HR APIs require a valid authorized session.
 16. Existing v1.0 tenant, security, privacy and readiness controls remain intact.
+
+## v1.2 acceptance criteria
+1. Employees can view their current profile and assignment context in one workspace.
+2. Allow-listed profile changes create auditable approval requests.
+3. HR approval updates the system-of-record field and retains old/new values.
+4. Employees can submit and track HR service requests; HR can record resolution.
+5. Employees can acknowledge a document version once with timestamp and IP evidence.
+6. Notification preferences include channel, digest and quiet hours.
+7. Unified inbox items retain links to existing source transactions.
+8. Dismissing an inbox item does not alter the source workflow.
+9. Managers can view direct reports, leave/timesheet approvals, lifecycle tasks and team events.
+10. Manager scope derives from the current employee-manager relationship.
+11. The responsive shell provides installable PWA assets and an offline fallback.
+12. Offline mode never queues or submits HR transactions.
+13. Experience APIs require valid role-scoped authentication.
+14. Existing v1.1 Core HR and v1.0 production controls remain intact.

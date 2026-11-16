@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 - Employee Experience
+- Added employee self-service profile and assignment workspace.
+- Added approval-gated personal/contact data changes with before/after evidence.
+- Added employee service requests and HR resolution tracking.
+- Added document-version acknowledgements.
+- Added notification channel, digest and quiet-hour preferences.
+- Added unified inbox references for approvals and lifecycle tasks.
+- Added manager team overview, approvals, task list and team calendar.
+- Added responsive PWA manifest, icon, service worker and offline fallback.
+- Added experience APIs, tests, acceptance criteria and operating documentation.
+
 ## 1.1.0 - Global Core HR
 - Added global legal entities, locations, cost centers and projects.
 - Added job families, profiles, grades, levels and skill requirements.

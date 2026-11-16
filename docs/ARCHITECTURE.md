@@ -32,3 +32,7 @@ Production hardening adds a request security middleware, server-side session reg
 
 ## v1.1 Global Core HR
 Global Core HR adds effective-dated organizational, job, assignment and salary records without replacing the original employee master used by earlier modules. Controlled transfers close the source assignment and create a new target assignment in one transaction. Lifecycle events link each material employment change to its source transaction. Journey definitions and relative-date task templates provide a common engine for onboarding and other employee transitions; offboarding uses a dedicated approval and clearance workflow because separation has irreversible access, asset, payroll and recordkeeping consequences.
+
+
+## v1.2 employee experience layer
+The experience layer composes existing domain records into employee, manager and inbox views. Employee changes and service requests are new auditable request records; the inbox is a reference index keyed to source entity type and ID. PWA caching is limited to static shell assets and an offline explanation page. Transactional data remains network-first and is never queued offline.

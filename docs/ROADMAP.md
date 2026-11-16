@@ -13,6 +13,8 @@ Salary structures, earnings/deductions, attendance inputs, arrears, reimbursemen
 Tenant isolation, PostgreSQL, object storage, subscriptions, custom domains, SSO/SCIM configuration, monitoring, backup/PITR controls and a Local migration assistant. Delivered in v0.6.0 as a cloud beta with documented provider-integration gates.    
 ## v1.0 production hardening, release candidate delivered    
 Security, accessibility, localization, disaster-recovery, load testing, retention and DPDP control workflows are implemented in v1.0.0. Independent ASVS verification, penetration testing, legal validation, accessibility audit, approved load thresholds and restore sign-off remain evidence gates before production certification.    
+## v1.2 Employee Experience, delivered
+Employee self-service, manager workspace, unified inbox, notifications, documents, team calendar and mobile-ready PWA. Delivered in v1.2.0.
 ## v1.1 Global Core HR, delivered
 Global employee data, legal entities, locations, cost centers, projects, jobs, effective-dated assignments, transfers, salary history, skills alignment, lifecycle journeys and offboarding. Delivered in v1.1.0.
 ## Later    

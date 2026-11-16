@@ -370,3 +370,41 @@ def test_core_hr_apis_require_authentication():
     with client() as c:
         for path in ['/api/v1/core-hr/assignments','/api/v1/core-hr/events','/api/v1/core-hr/journeys','/api/v1/core-hr/offboarding']:
             assert c.get(path,follow_redirects=False).status_code in (303,307)
+
+
+def test_employee_experience_profile_requests_and_preferences():
+    with authenticated_client() as c:
+        assert c.post('/experience/profile-change',data={'field_name':'preferred_name','new_value':'Anu','reason':'Preferred name'},follow_redirects=False).status_code==303
+        change=q('SELECT MAX(id) id FROM employee_change_requests',one=True)['id']
+        assert c.post(f'/experience/profile-change/{change}/decision',data={'decision':'approve','comment':'Verified'},follow_redirects=False).status_code==303
+        assert q('SELECT preferred_name FROM employee_global_profiles WHERE employee_id=1',one=True)['preferred_name']=='Anu'
+        assert c.post('/experience/requests',data={'request_type':'Employment Letter','title':'Visa letter','details':'For travel','due_date':'2027-01-31'},follow_redirects=False).status_code==303
+        request_id=q('SELECT MAX(id) id FROM employee_requests',one=True)['id']
+        assert c.post(f'/experience/requests/{request_id}/resolve',data={'resolution':'Letter issued'},follow_redirects=False).status_code==303
+        assert q('SELECT status FROM employee_requests WHERE id=?',(request_id,),True)['status']=='Completed'
+        assert c.post('/experience/preferences',data={'email_enabled':'1','in_app_enabled':'1','push_enabled':'1','digest_frequency':'Immediate','quiet_start':'22:00','quiet_end':'07:00'},follow_redirects=False).status_code==303
+        assert q('SELECT push_enabled FROM notification_preferences WHERE user_id=1',one=True)['push_enabled']==1
+
+
+def test_unified_inbox_and_manager_calendar():
+    with authenticated_client() as c:
+        assert c.post('/leave/request',data={'employee_id':'2','leave_type_id':'1','start_date':'2027-02-01','end_date':'2027-02-02','days':'2','reason':'Travel'},follow_redirects=False).status_code==303
+        inbox=c.get('/api/v1/experience/inbox').json();assert any(x['source_entity_type']=='leave_request' for x in inbox)
+        calendar=c.get('/api/v1/experience/team-calendar').json();assert any(x['employee']=='Arjun Mehta' and x['event_type']=='Leave' for x in calendar)
+
+
+def test_document_acknowledgement_and_pwa_assets():
+    from app.main import execq
+    did=execq("INSERT INTO documents(employee_id,category,title,filename) VALUES(1,'Policy','Code of Conduct','conduct.pdf')")
+    with authenticated_client() as c:
+        assert c.post(f'/experience/documents/{did}/acknowledge',data={'version':'2027.1'},follow_redirects=False).status_code==303
+        assert q('SELECT COUNT(*) n FROM employee_acknowledgements WHERE employee_id=1 AND document_id=?',(did,),True)['n']==1
+        assert c.get('/static/manifest.webmanifest').status_code==200
+        assert c.get('/static/sw.js').status_code==200
+        assert c.get('/static/offline.html').status_code==200
+
+
+def test_experience_apis_require_authentication():
+    with client() as c:
+        for path in ['/api/v1/experience/inbox','/api/v1/experience/team-calendar']:
+            assert c.get(path,follow_redirects=False).status_code in (303,307)

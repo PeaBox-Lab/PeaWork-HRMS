@@ -1,11 +1,19 @@
-# PeaWork v1.1.0  
-Global Core HR platform for multi-entity organizations. v1.1 adds global employee, organization, job, assignment, transfer, salary, journey and offboarding records while preserving the v1.0 production-readiness controls.  
+# PeaWork v1.2.0  
+Employee and manager experience platform built on Global Core HR. v1.2 adds self-service, unified work, approvals, notifications, documents, team calendar and a mobile-ready PWA while preserving production controls.  
 ## Included  
 ### HR foundation  
 - Secure login, PBKDF2 password hashing, role-based access and audit events  
 - Employee master, effective-dated hire history, departments, positions and manager relationships  
 - Leave requests and approvals, India holiday calendar, document register and CSV export  
 - Operational dashboard, reports, REST API, SQLite local mode and Docker local-server mode  
+### v1.2 Employee Experience
+- Employee profile, assignment, documents and request self-service
+- Approval-gated profile changes and HR service resolution
+- Document acknowledgements and notification preferences
+- Unified inbox linked to existing source workflows
+- Manager team overview, approval inbox, tasks and calendar
+- Installable responsive PWA with static-shell offline fallback
+
 ### v1.1 Global Core HR
 - Global legal entities, work locations, cost centers and projects
 - Job families, job profiles, grades, levels and required skills
@@ -131,8 +139,10 @@ Interactive documentation: `/docs`
 - `GET /api/v1/core-hr/assignments`
 - `GET /api/v1/core-hr/events`
 - `GET /api/v1/core-hr/journeys`
-- `GET /api/v1/core-hr/offboarding`  
-See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`, and `docs/V06_CLOUD_BETA.md`, `docs/V10_PRODUCTION_HARDENING.md`, and `docs/PRODUCTION_CONTROLS.md`, and `docs/V11_GLOBAL_CORE_HR.md`.
+- `GET /api/v1/core-hr/offboarding`
+- `GET /api/v1/experience/inbox`
+- `GET /api/v1/experience/team-calendar`  
+See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`, and `docs/V06_CLOUD_BETA.md`, `docs/V10_PRODUCTION_HARDENING.md`, and `docs/PRODUCTION_CONTROLS.md`, and `docs/V11_GLOBAL_CORE_HR.md`, and `docs/V12_EMPLOYEE_EXPERIENCE.md`.
 
 
 ## Cloud beta quick start
