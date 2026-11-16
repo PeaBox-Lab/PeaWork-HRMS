@@ -1,18 +1,18 @@
-# Architecture  
-PeaWork starts as a modular monolith. Modules share one transaction boundary while keeping domain separation: identity/access, people, organization, leave, documents, reporting and audit.  
-## Current local topology  
-Browser → FastAPI/Jinja UI + REST API → SQLite → local upload vault.  
-## Local server target  
-Browser → reverse proxy/TLS → PeaWork app → PostgreSQL → encrypted file storage. Package through Docker Compose, scheduled backups and restore verification.  
-## Cloud target  
-CDN/WAF → load balancer → stateless PeaWork application → managed PostgreSQL + object storage + queue/workers. Add tenant_id to all tenant-owned records, database row-level security, per-tenant encryption context, centralized observability, SSO/SAML, SCIM and point-in-time recovery.  
-## Why modular monolith first  
-For the 50–2,000 employee target, a modular monolith lowers deployment and transaction complexity. Extract payroll calculations, notifications, reporting and integrations into services only after measurable scale or release-cadence pressure.
-
-
-## v0.2 modules
-The recruitment and onboarding workflows remain inside the modular monolith and share the existing identity, organization, employee, notification and audit infrastructure. New domain tables isolate requisitions, candidates, applications, interviews, offers, journey templates, onboarding instances, onboarding tasks and probation reviews. Candidate conversion uses one SQLite transaction so employee creation and recruitment closure cannot diverge.
-
-
-## v0.3 workforce module
+# Architecture    
+PeaWork starts as a modular monolith. Modules share one transaction boundary while keeping domain separation: identity/access, people, organization, leave, documents, reporting and audit.    
+## Current local topology    
+Browser     FastAPI/Jinja UI + REST API     SQLite     local upload vault.    
+## Local server target    
+Browser     reverse proxy/TLS     PeaWork app     PostgreSQL     encrypted file storage. Package through Docker Compose, scheduled backups and restore verification.    
+## Cloud target    
+CDN/WAF     load balancer     stateless PeaWork application     managed PostgreSQL + object storage + queue/workers. Add tenant_id to all tenant-owned records, database row-level security, per-tenant encryption context, centralized observability, SSO/SAML, SCIM and point-in-time recovery.    
+## Why modular monolith first    
+For the 50   2,000 employee target, a modular monolith lowers deployment and transaction complexity. Extract payroll calculations, notifications, reporting and integrations into services only after measurable scale or release-cadence pressure.  
+## v0.2 modules  
+The recruitment and onboarding workflows remain inside the modular monolith and share the existing identity, organization, employee, notification and audit infrastructure. New domain tables isolate requisitions, candidates, applications, interviews, offers, journey templates, onboarding instances, onboarding tasks and probation reviews. Candidate conversion uses one SQLite transaction so employee creation and recruitment closure cannot diverge.  
+## v0.3 workforce module  
 Workforce operations remain in the shared modular monolith. Effective-dated work patterns join employees to shifts and weekly-off definitions. Attendance is unique by employee/date so manual, CSV and API sources converge on one record. Timesheet headers control submission and approval while dated entries preserve project/activity detail. Leave accrual runs and entries provide run-level traceability; each leave type can run only once per period, and balance changes occur in the same database transaction.
+
+
+## v0.4 talent module
+Talent remains inside the modular monolith and reuses employee, manager, department, identity and audit data. Performance cycles provide the time boundary; participants connect employees and managers to self, manager, calibrated and final outcomes. Goals preserve parent alignment and append-only progress updates. Feedback requests and responses separate workflow state from content and apply visibility filtering in application queries. Skills and competencies use reusable libraries with employee evidence. Development plans own measurable actions. Calibration sessions preserve proposed and calibrated ratings, buckets, rationale and risk flags without overwriting the manager-review evidence.
