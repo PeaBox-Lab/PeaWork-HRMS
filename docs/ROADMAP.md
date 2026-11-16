@@ -7,8 +7,8 @@ Requisitions, candidate pipeline, interview scorecards, offers, configurable onb
 Attendance, shifts, weekly offs, overtime, timesheets, biometric import/API, leave accrual jobs and manager calendar. Delivered in v0.3.0 as the complete functional MVP workflow.    
 ## v0.4 Talent, delivered    
 Goals/OKRs, performance cycles, check-ins, 360 feedback, skills, competencies, development plans and calibration. Delivered in v0.4.0 as the complete functional MVP workflow.    
-## v0.5 India payroll beta, 10   14 weeks    
-Salary structures, earnings/deductions, attendance inputs, arrears, reimbursements, payroll preview, variance checks, payslips and accounting export. Statutory implementation requires specialist validation and automated golden payroll cases.    
+## v0.5 India payroll beta, delivered    
+Salary structures, earnings/deductions, attendance inputs, arrears, reimbursements, payroll preview, variance checks, payslips and accounting export. Delivered in v0.5.0 as a validation-gated beta; statutory implementation still requires specialist approval and production golden cases.    
 ## v0.6 Cloud beta, 8   12 weeks    
 Tenant isolation, PostgreSQL, object storage, subscriptions, custom domains, SSO, SCIM, monitoring, backup/PITR and migration assistant from Local.    
 ## v1.0 production hardening, 6   8 weeks    

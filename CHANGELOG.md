@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 - India payroll beta
+- Added configurable earnings, deductions, reimbursements and employer costs.
+- Added effective-dated statutory rule versions with qualified-validation gates.
+- Added salary structures and effective-dated employee compensation.
+- Added attendance/payable-day synchronization from Workforce.
+- Added approved variable inputs, arrears, recoveries and reimbursement claims.
+- Added payroll previews, prior-period net-pay variances and threshold controls.
+- Added finalization gates for statutory validation, calculation errors and GL mappings.
+- Added published employee payslips and privacy-aware access.
+- Added debit-credit-balanced accounting CSV export.
+- Added payroll APIs, lifecycle tests, acceptance criteria and specialist-review documentation.
+
 ## 0.4.0 - Talent
 - Added performance cycles, deadlines, participants and workflow statuses.
 - Added weighted goals/OKRs, parent alignment, metric progress and update history.

@@ -3,12 +3,13 @@ from fastapi.responses import HTMLResponse,RedirectResponse,StreamingResponse,JS
 from fastapi.templating import Jinja2Templates    
 from fastapi.staticfiles import StaticFiles    
 from pathlib import Path    
-from datetime import date,datetime,timedelta    
+from datetime import date,datetime,timedelta
+from decimal import Decimal, ROUND_HALF_UP    
 import csv,io,json,os,shutil    
 from .db import conn,init_db    
 from .security import hash_password,verify_password,token,untoken    
 BASE=Path(__file__).resolve().parent.parent; UPLOADS=BASE/'uploads'; UPLOADS.mkdir(exist_ok=True)    
-app=FastAPI(title='PeaWork HRIS',version='0.4.0',description='India-first local and cloud-ready HRIS')    
+app=FastAPI(title='PeaWork HRIS',version='0.5.0',description='India-first local and cloud-ready HRIS')    
 app.mount('/static',StaticFiles(directory=BASE/'app'/'static'),name='static'); templates=Jinja2Templates(directory=BASE/'app'/'templates')    
 def q(sql,args=(),one=False):    
     with conn() as c:    
@@ -69,13 +70,22 @@ def seed():
         execq('INSERT INTO competencies(name,category,description) VALUES(?,?,?)',(name,category,description))
     for name,category in [('Python','Technical'),('FastAPI','Technical'),('Data Analysis','Technical'),('Stakeholder Management','Business'),('Coaching','Leadership')]:
         execq('INSERT INTO skills(name,category) VALUES(?,?)',(name,category))
-    audit('system','SEED','database','','Demo organization initialized through v0.4 talent')    
+    for code,name,ctype,calc,taxable,order in [
+        ('BASIC','Basic Pay','Earning','Percent CTC',1,10),
+        ('HRA','Housing Allowance','Earning','Percent Component',1,20),
+        ('SPECIAL','Special Allowance','Earning','Fixed',1,30),
+        ('ARREAR','Arrears','Earning','Input',1,40),
+        ('REIMB','Approved Reimbursement','Reimbursement','Input',0,50),
+        ('OTHERDED','Other Deduction','Deduction','Input',0,60),
+    ]:
+        execq('INSERT INTO pay_components(code,name,component_type,calculation_type,taxable,display_order) VALUES(?,?,?,?,?,?)',(code,name,ctype,calc,taxable,order))
+    audit('system','SEED','database','','Demo organization initialized through v0.5 payroll beta')    
 @app.exception_handler(401)    
 async def unauthorized(request,exc): return RedirectResponse('/login?error=Please+sign+in',303)    
 @app.exception_handler(403)    
 async def forbidden(request,exc): return page(request,'error.html',code=403,message='You do not have access to this action.')    
 @app.get('/health')    
-def health(): return {'status':'ok','version':'0.4.0','deployment':os.getenv('PEAWORK_ENV','local')}    
+def health(): return {'status':'ok','version':'0.5.0','deployment':os.getenv('PEAWORK_ENV','local')}    
 @app.get('/login',response_class=HTMLResponse)    
 def login_page(request:Request,error:str=''): return page(request,'login.html',error=error)    
 @app.post('/login')    
@@ -93,7 +103,7 @@ def logout(request:Request):
 @app.get('/',response_class=HTMLResponse)    
 def dashboard(request:Request):    
     u=require(request)    
-    stats={'employees':q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n'],'departments':q('SELECT COUNT(*) n FROM departments WHERE active=1',one=True)['n'],'pending':q("SELECT COUNT(*) n FROM leave_requests WHERE status='Pending'",one=True)['n'],'documents':q('SELECT COUNT(*) n FROM documents',one=True)['n'],'open_requisitions':q("SELECT COUNT(*) n FROM requisitions WHERE status='Open'",one=True)['n'],'active_candidates':q("SELECT COUNT(*) n FROM applications WHERE status='Active'",one=True)['n'],'onboarding':q("SELECT COUNT(*) n FROM onboardings WHERE status IN ('Planned','In Progress')",one=True)['n'],'present_today':q("SELECT COUNT(*) n FROM attendance_records WHERE attendance_date=? AND status IN ('Present','Late','Half Day')",(date.today().isoformat(),),True)['n'],'pending_timesheets':q("SELECT COUNT(*) n FROM timesheets WHERE status='Submitted'",one=True)['n'],'active_cycles':q("SELECT COUNT(*) n FROM performance_cycles WHERE status='Active'",one=True)['n'],'goals_at_risk':q("SELECT COUNT(*) n FROM goals WHERE status='At Risk'",one=True)['n'],'feedback_due':q("SELECT COUNT(*) n FROM feedback_requests WHERE status='Requested'",one=True)['n']}    
+    stats={'employees':q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n'],'departments':q('SELECT COUNT(*) n FROM departments WHERE active=1',one=True)['n'],'pending':q("SELECT COUNT(*) n FROM leave_requests WHERE status='Pending'",one=True)['n'],'documents':q('SELECT COUNT(*) n FROM documents',one=True)['n'],'open_requisitions':q("SELECT COUNT(*) n FROM requisitions WHERE status='Open'",one=True)['n'],'active_candidates':q("SELECT COUNT(*) n FROM applications WHERE status='Active'",one=True)['n'],'onboarding':q("SELECT COUNT(*) n FROM onboardings WHERE status IN ('Planned','In Progress')",one=True)['n'],'present_today':q("SELECT COUNT(*) n FROM attendance_records WHERE attendance_date=? AND status IN ('Present','Late','Half Day')",(date.today().isoformat(),),True)['n'],'pending_timesheets':q("SELECT COUNT(*) n FROM timesheets WHERE status='Submitted'",one=True)['n'],'active_cycles':q("SELECT COUNT(*) n FROM performance_cycles WHERE status='Active'",one=True)['n'],'goals_at_risk':q("SELECT COUNT(*) n FROM goals WHERE status='At Risk'",one=True)['n'],'feedback_due':q("SELECT COUNT(*) n FROM feedback_requests WHERE status='Requested'",one=True)['n'],'open_payroll':q("SELECT COUNT(*) n FROM payroll_periods WHERE status IN ('Open','Processing')",one=True)['n'],'payroll_errors':q("SELECT COUNT(*) n FROM payroll_runs WHERE validation_errors IS NOT NULL AND validation_errors!=''",one=True)['n']}    
     recent=q('SELECT e.employee_no,e.first_name,e.last_name,d.name department,e.date_of_joining FROM employees e LEFT JOIN departments d ON d.id=e.department_id ORDER BY e.id DESC LIMIT 6')    
     leaves=q("SELECT l.id,e.first_name||' '||e.last_name employee,t.name type,l.start_date,l.end_date,l.days,l.status FROM leave_requests l JOIN employees e ON e.id=l.employee_id JOIN leave_types t ON t.id=l.leave_type_id ORDER BY l.id DESC LIMIT 6")    
     return page(request,'dashboard.html',stats=stats,recent=recent,leaves=leaves)    
@@ -886,3 +896,318 @@ def api_skills(request:Request): require(request); return q('SELECT * FROM skill
 def api_development_plans(request:Request):
     u=require(request); where='' if u['role'] in TALENT_MANAGER_ROLES else ' WHERE employee_id=?'; args=() if not where else (u['employee_id'],)
     return q('SELECT * FROM development_plans'+where+' ORDER BY id DESC',args)
+
+# -------------------------- v0.5 India payroll beta -------------------------
+PAYROLL_ROLES = ['admin','hr','payroll']
+
+def money(value):
+    return float(Decimal(str(value or 0)).quantize(Decimal('0.01'),rounding=ROUND_HALF_UP))
+
+def validated_statutory_rule(rule_name, on_date):
+    return q("""SELECT * FROM statutory_rule_versions WHERE rule_name=? AND validation_status='Validated'
+      AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC LIMIT 1""",(rule_name,on_date,on_date),True)
+
+def payroll_context(u):
+    own_filter='' if u['role'] in PAYROLL_ROLES else ' WHERE e.id=?'
+    own_args=() if not own_filter else (u['employee_id'],)
+    return {
+      'components':q('SELECT * FROM pay_components WHERE active=1 ORDER BY display_order,code'),
+      'statutory_rules':q('SELECT * FROM statutory_rule_versions ORDER BY rule_name,effective_from DESC'),
+      'structures':q("""SELECT s.*,(SELECT COUNT(*) FROM salary_structure_lines l WHERE l.structure_id=s.id) line_count
+        FROM salary_structures s ORDER BY s.name"""),
+      'structure_lines':q("""SELECT l.*,s.name structure,c.code,c.name component,c.component_type,c.statutory
+        FROM salary_structure_lines l JOIN salary_structures s ON s.id=l.structure_id JOIN pay_components c ON c.id=l.component_id
+        ORDER BY s.name,c.display_order,c.code"""),
+      'employees':q("SELECT id,employee_no,first_name||' '||last_name name FROM employees WHERE status='Active' ORDER BY first_name"),
+      'compensations':q("""SELECT x.*,e.employee_no,e.first_name||' '||e.last_name employee,s.name structure
+        FROM employee_compensation x JOIN employees e ON e.id=x.employee_id JOIN salary_structures s ON s.id=x.structure_id"""+own_filter+' ORDER BY x.effective_from DESC,e.first_name',own_args),
+      'periods':q('SELECT * FROM payroll_periods ORDER BY start_date DESC,id DESC'),
+      'inputs':q("""SELECT i.*,p.period_code,e.first_name||' '||e.last_name employee,c.code,c.name component,u.username approved_by_name
+        FROM payroll_inputs i JOIN payroll_periods p ON p.id=i.period_id JOIN employees e ON e.id=i.employee_id
+        JOIN pay_components c ON c.id=i.component_id LEFT JOIN users u ON u.id=i.approved_by ORDER BY i.id DESC"""),
+      'attendance_inputs':q("""SELECT a.*,p.period_code,e.first_name||' '||e.last_name employee FROM payroll_attendance_inputs a
+        JOIN payroll_periods p ON p.id=a.period_id JOIN employees e ON e.id=a.employee_id ORDER BY p.start_date DESC,e.first_name"""),
+      'claims':q("""SELECT r.*,e.first_name||' '||e.last_name employee,p.period_code,u.username approved_by_name
+        FROM reimbursement_claims r JOIN employees e ON e.id=r.employee_id LEFT JOIN payroll_periods p ON p.id=r.period_id
+        LEFT JOIN users u ON u.id=r.approved_by WHERE (? IN ('admin','hr','payroll') OR r.employee_id=?) ORDER BY r.id DESC""",(u['role'],u['employee_id'])),
+      'runs':q("""SELECT r.*,p.period_code,p.pay_date,u.username created_by_name FROM payroll_runs r JOIN payroll_periods p ON p.id=r.period_id
+        LEFT JOIN users u ON u.id=r.created_by ORDER BY p.start_date DESC,r.run_number DESC"""),
+      'run_employees':q("""SELECT x.*,p.period_code,e.employee_no,e.first_name||' '||e.last_name employee,r.status run_status
+        FROM payroll_run_employees x JOIN payroll_runs r ON r.id=x.run_id JOIN payroll_periods p ON p.id=r.period_id
+        JOIN employees e ON e.id=x.employee_id WHERE (? IN ('admin','hr','payroll') OR x.employee_id=?) ORDER BY r.id DESC,e.first_name""",(u['role'],u['employee_id'])),
+      'exports':q("""SELECT x.*,p.period_code,r.run_number,u.username exported_by_name FROM payroll_accounting_exports x
+        JOIN payroll_runs r ON r.id=x.run_id JOIN payroll_periods p ON p.id=r.period_id LEFT JOIN users u ON u.id=x.exported_by ORDER BY x.id DESC"""),
+    }
+
+@app.get('/payroll',response_class=HTMLResponse)
+def payroll(request:Request):
+    u=require(request)
+    return page(request,'payroll.html',**payroll_context(u))
+
+@app.post('/payroll/components')
+def payroll_component_create(request:Request,code:str=Form(...),name:str=Form(...),component_type:str=Form(...),calculation_type:str=Form('Fixed'),base_component_code:str=Form(''),default_rate:float|None=Form(None),taxable:int=Form(0),statutory:int=Form(0),statutory_rule_name:str=Form(''),gl_account:str=Form(''),liability_account:str=Form(''),display_order:int=Form(0)):
+    u=require(request,PAYROLL_ROLES)
+    cid=execq('INSERT INTO pay_components(code,name,component_type,calculation_type,base_component_code,default_rate,taxable,statutory,statutory_rule_name,gl_account,liability_account,display_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(code.upper(),name,component_type,calculation_type,base_component_code.upper() or None,default_rate,int(bool(taxable)),int(bool(statutory)),statutory_rule_name or None,gl_account or None,liability_account or None,display_order))
+    audit(u['username'],'CREATE','pay_component',cid,code)
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/statutory-rules')
+def statutory_rule_create(request:Request,rule_name:str=Form(...),jurisdiction:str=Form('India'),effective_from:str=Form(...),effective_to:str=Form(''),parameters_json:str=Form(...),validation_status:str=Form('Draft'),validated_by:str=Form(''),notes:str=Form('')):
+    u=require(request,PAYROLL_ROLES)
+    try: json.loads(parameters_json)
+    except json.JSONDecodeError: raise HTTPException(400,'Parameters must be valid JSON')
+    if validation_status=='Validated' and not validated_by: raise HTTPException(400,'Validated rules require a qualified validator name')
+    rid=execq('INSERT INTO statutory_rule_versions(rule_name,jurisdiction,effective_from,effective_to,parameters_json,validation_status,validated_by,validated_at,notes) VALUES(?,?,?,?,?,?,?,CASE WHEN ?=\'Validated\' THEN CURRENT_TIMESTAMP ELSE NULL END,?)',(rule_name,jurisdiction,effective_from,effective_to or None,parameters_json,validation_status,validated_by or None,validation_status,notes))
+    audit(u['username'],'CREATE','statutory_rule',rid,f'{rule_name}; {validation_status}')
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/structures')
+def salary_structure_create(request:Request,name:str=Form(...),code:str=Form(...),description:str=Form('')):
+    u=require(request,PAYROLL_ROLES)
+    sid=execq('INSERT INTO salary_structures(name,code,description) VALUES(?,?,?)',(name,code.upper(),description))
+    audit(u['username'],'CREATE','salary_structure',sid,code)
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/structures/{sid}/lines')
+def salary_structure_line(sid:int,request:Request,component_id:int=Form(...),calculation_type:str=Form('Fixed'),amount:float|None=Form(None),rate:float|None=Form(None),base_component_code:str=Form(''),employer_cost:int=Form(0)):
+    u=require(request,PAYROLL_ROLES)
+    lid=execq('INSERT INTO salary_structure_lines(structure_id,component_id,calculation_type,amount,rate,base_component_code,employer_cost) VALUES(?,?,?,?,?,?,?)',(sid,component_id,calculation_type,amount,rate,base_component_code.upper() or None,int(bool(employer_cost))))
+    audit(u['username'],'CREATE','salary_structure_line',lid,f'structure={sid}; component={component_id}')
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/compensation')
+def compensation_assign(request:Request,employee_id:int=Form(...),structure_id:int=Form(...),annual_ctc:float=Form(...),effective_from:str=Form(...),effective_to:str=Form('')):
+    u=require(request,PAYROLL_ROLES)
+    cid=execq('INSERT INTO employee_compensation(employee_id,structure_id,annual_ctc,effective_from,effective_to) VALUES(?,?,?,?,?)',(employee_id,structure_id,money(annual_ctc),effective_from,effective_to or None))
+    audit(u['username'],'ASSIGN','employee_compensation',cid,f'employee={employee_id}; annual_ctc={annual_ctc}')
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/periods')
+def payroll_period_create(request:Request,period_code:str=Form(...),start_date:str=Form(...),end_date:str=Form(...),pay_date:str=Form(...),working_days:float=Form(...)):
+    u=require(request,PAYROLL_ROLES)
+    pid=execq('INSERT INTO payroll_periods(period_code,start_date,end_date,pay_date,working_days) VALUES(?,?,?,?,?)',(period_code,start_date,end_date,pay_date,working_days))
+    audit(u['username'],'CREATE','payroll_period',pid,period_code)
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/inputs')
+def payroll_input_create(request:Request,period_id:int=Form(...),employee_id:int=Form(...),component_id:int=Form(...),input_type:str=Form('Variable'),amount:float=Form(...),description:str=Form('')):
+    u=require(request,PAYROLL_ROLES)
+    iid=execq('INSERT INTO payroll_inputs(period_id,employee_id,component_id,input_type,amount,description) VALUES(?,?,?,?,?,?)',(period_id,employee_id,component_id,input_type,money(amount),description))
+    audit(u['username'],'CREATE','payroll_input',iid,input_type)
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/inputs/{iid}/approve')
+def payroll_input_approve(iid:int,request:Request):
+    u=require(request,PAYROLL_ROLES)
+    execq('UPDATE payroll_inputs SET approved=1,approved_by=? WHERE id=?',(u['id'],iid))
+    audit(u['username'],'APPROVE','payroll_input',iid)
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/attendance/sync')
+def payroll_attendance_sync(request:Request,period_id:int=Form(...)):
+    u=require(request,PAYROLL_ROLES)
+    period=q('SELECT * FROM payroll_periods WHERE id=?',(period_id,),True)
+    if not period: raise HTTPException(404,'Payroll period not found')
+    employees=q("SELECT id FROM employees WHERE status='Active'")
+    for emp in employees:
+        stats=q("""SELECT COUNT(*) recorded_days,
+          COALESCE(SUM(CASE WHEN status IN ('Present','Late','Remote') THEN 1 WHEN status='Half Day' THEN .5 ELSE 0 END),0) payable_days,
+          COALESCE(SUM(overtime_hours),0) overtime_hours FROM attendance_records
+          WHERE employee_id=? AND attendance_date>=? AND attendance_date<=?""",(emp['id'],period['start_date'],period['end_date']),True)
+        payable=stats['payable_days'] if stats['recorded_days'] else period['working_days']
+        lop=max(0,money(period['working_days']-payable))
+        execq("""INSERT INTO payroll_attendance_inputs(period_id,employee_id,payable_days,loss_of_pay_days,overtime_hours,source)
+          VALUES(?,?,?,?,?,'Workforce') ON CONFLICT(period_id,employee_id) DO UPDATE SET payable_days=excluded.payable_days,
+          loss_of_pay_days=excluded.loss_of_pay_days,overtime_hours=excluded.overtime_hours,source=excluded.source""",(period_id,emp['id'],payable,lop,stats['overtime_hours']))
+    audit(u['username'],'SYNC','payroll_attendance',period_id,f'{len(employees)} employees')
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/reimbursements')
+def reimbursement_create(request:Request,employee_id:int=Form(...),period_id:int|None=Form(None),category:str=Form(...),amount:float=Form(...),description:str=Form('')):
+    u=require(request)
+    if u['role']=='employee' and employee_id!=u['employee_id']: raise HTTPException(403)
+    rid=execq('INSERT INTO reimbursement_claims(employee_id,period_id,category,amount,description) VALUES(?,?,?,?,?)',(employee_id,period_id,category,money(amount),description))
+    audit(u['username'],'CREATE','reimbursement',rid,category)
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/reimbursements/{rid}/decision')
+def reimbursement_decision(rid:int,request:Request,decision:str=Form(...)):
+    u=require(request,PAYROLL_ROLES)
+    status='Approved' if decision=='approve' else 'Rejected'
+    execq('UPDATE reimbursement_claims SET status=?,approved_by=?,approved_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',(status,u['id'],rid,'Pending'))
+    audit(u['username'],status.upper(),'reimbursement',rid)
+    return RedirectResponse('/payroll',303)
+
+def calculate_employee_payroll(period, employee_id):
+    compensation=q("""SELECT * FROM employee_compensation WHERE employee_id=? AND status='Active' AND effective_from<=?
+      AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC LIMIT 1""",(employee_id,period['end_date'],period['start_date']),True)
+    if not compensation: return None,[],['No active compensation assignment']
+    attendance=q('SELECT * FROM payroll_attendance_inputs WHERE period_id=? AND employee_id=?',(period['id'],employee_id),True)
+    payable_days=attendance['payable_days'] if attendance else period['working_days']
+    ratio=Decimal(str(payable_days or 0))/Decimal(str(period['working_days'] or 1))
+    structure_lines=q("""SELECT l.*,c.code,c.name component_name,c.component_type,c.taxable,c.statutory,c.statutory_rule_name,c.gl_account,c.liability_account
+      FROM salary_structure_lines l JOIN pay_components c ON c.id=l.component_id WHERE l.structure_id=? AND c.active=1
+      ORDER BY c.display_order,c.id""",(compensation['structure_id'],))
+    overrides={x['component_id']:x for x in q('SELECT * FROM employee_component_overrides WHERE compensation_id=?',(compensation['id'],))}
+    calculated={}; lines=[]; errors=[]
+    annual_ctc=Decimal(str(compensation['annual_ctc'] or 0)); monthly_ctc=annual_ctc/Decimal('12')
+    for line in structure_lines:
+        rule=None
+        if line['statutory']:
+            rule=validated_statutory_rule(line['statutory_rule_name'],period['end_date'])
+            if not rule:
+                errors.append(f"Statutory component {line['code']} lacks a validated effective rule")
+                continue
+        ov=overrides.get(line['component_id']); calc=line['calculation_type']; amount=Decimal('0')
+        configured_amount=ov['amount'] if ov and ov['amount'] is not None else line['amount']
+        configured_rate=ov['rate'] if ov and ov['rate'] is not None else line['rate']
+        base=line['base_component_code']
+        if rule:
+            try:
+                params=json.loads(rule['parameters_json'])
+                calc=params.get('calculation_type',calc)
+                configured_amount=params.get('amount',configured_amount)
+                configured_rate=params.get('rate',configured_rate)
+                base=params.get('base_component_code',base)
+            except (json.JSONDecodeError,TypeError,AttributeError):
+                errors.append(f"Validated statutory rule {rule['rule_name']} contains invalid parameters")
+                continue
+        if calc=='Fixed': amount=Decimal(str(configured_amount or 0))
+        elif calc=='Percent CTC': amount=monthly_ctc*Decimal(str(configured_rate or 0))/Decimal('100')
+        elif calc=='Percent Component':
+            amount=calculated.get(base,Decimal('0'))*Decimal(str(configured_rate or 0))/Decimal('100')
+            if base not in calculated: errors.append(f"{line['code']} base component {base or 'not set'} was unavailable")
+        elif calc=='Input': amount=Decimal('0')
+        else: errors.append(f"Unsupported calculation type {calc} for {line['code']}")
+        if line['component_type'] in ('Earning','Employer Cost') and calc!='Input': amount*=ratio
+        amount=amount.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP); calculated[line['code']]=amount
+        if amount: lines.append({**line,'amount':float(amount),'source':'Structure'})
+    for inp in q("""SELECT i.*,c.code,c.name component_name,c.component_type,c.taxable,c.statutory,c.statutory_rule_name,c.gl_account,c.liability_account
+      FROM payroll_inputs i JOIN pay_components c ON c.id=i.component_id WHERE i.period_id=? AND i.employee_id=? AND i.approved=1""",(period['id'],employee_id)):
+        if inp['statutory'] and not validated_statutory_rule(inp['statutory_rule_name'],period['end_date']):
+            errors.append(f"Input {inp['code']} lacks a validated effective statutory rule"); continue
+        lines.append({**inp,'amount':money(inp['amount']),'source':inp['input_type']})
+    reimb_component=q("SELECT * FROM pay_components WHERE code='REIMB' AND active=1",one=True)
+    approved_claims=q("SELECT COALESCE(SUM(amount),0) amount FROM reimbursement_claims WHERE employee_id=? AND period_id=? AND status='Approved'",(employee_id,period['id']),True)['amount']
+    if approved_claims and reimb_component: lines.append({**reimb_component,'component_name':reimb_component['name'],'amount':money(approved_claims),'source':'Approved reimbursement'})
+    gross=sum(Decimal(str(x['amount'])) for x in lines if x['component_type'] in ('Earning','Reimbursement'))
+    deductions=sum(Decimal(str(x['amount'])) for x in lines if x['component_type']=='Deduction')
+    employer=sum(Decimal(str(x['amount'])) for x in lines if x['component_type']=='Employer Cost' or x.get('employer_cost'))
+    net=gross-deductions
+    previous=q("""SELECT x.net_pay FROM payroll_run_employees x JOIN payroll_runs r ON r.id=x.run_id JOIN payroll_periods p ON p.id=r.period_id
+      WHERE x.employee_id=? AND r.status='Finalized' AND p.end_date<? ORDER BY p.end_date DESC,r.run_number DESC LIMIT 1""",(employee_id,period['start_date']),True)
+    previous_net=Decimal(str(previous['net_pay'] if previous else 0)); variance=net-previous_net
+    variance_pct=(variance/previous_net*Decimal('100')) if previous_net else Decimal('0')
+    summary={'compensation_id':compensation['id'],'payable_days':float(payable_days),'loss_of_pay_days':float(attendance['loss_of_pay_days'] if attendance else 0),'gross_pay':money(gross),'deductions':money(deductions),'net_pay':money(net),'employer_cost':money(employer),'previous_net_pay':money(previous_net),'net_variance':money(variance),'variance_percent':money(variance_pct)}
+    return summary,lines,errors
+
+@app.post('/payroll/runs')
+def payroll_run_create(request:Request,period_id:int=Form(...)):
+    u=require(request,PAYROLL_ROLES)
+    period=q('SELECT * FROM payroll_periods WHERE id=?',(period_id,),True)
+    if not period: raise HTTPException(404,'Payroll period not found')
+    run_no=(q('SELECT COALESCE(MAX(run_number),0)+1 n FROM payroll_runs WHERE period_id=?',(period_id,),True)['n'])
+    employees=q("SELECT id FROM employees WHERE status='Active' ORDER BY id")
+    all_results=[]; run_errors=[]
+    for emp in employees:
+        summary,lines,errors=calculate_employee_payroll(period,emp['id'])
+        if summary is None: run_errors.extend([f"Employee {emp['id']}: {x}" for x in errors]); continue
+        if errors: run_errors.extend([f"Employee {emp['id']}: {x}" for x in errors])
+        all_results.append((emp['id'],summary,lines,errors))
+    with conn() as c:
+        cur=c.execute("INSERT INTO payroll_runs(period_id,run_number,status,created_by,validation_errors) VALUES(?,?,'Preview',?,?)",(period_id,run_no,u['id'],'\n'.join(run_errors) or None)); run_id=cur.lastrowid
+        totals={'gross':0,'deductions':0,'net':0,'employer':0}
+        for employee_id,summary,lines,errors in all_results:
+            cur=c.execute("""INSERT INTO payroll_run_employees(run_id,employee_id,compensation_id,payable_days,loss_of_pay_days,gross_pay,deductions,net_pay,employer_cost,previous_net_pay,net_variance,variance_percent,status,errors)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(run_id,employee_id,summary['compensation_id'],summary['payable_days'],summary['loss_of_pay_days'],summary['gross_pay'],summary['deductions'],summary['net_pay'],summary['employer_cost'],summary['previous_net_pay'],summary['net_variance'],summary['variance_percent'],'Error' if errors else 'Calculated','; '.join(errors) or None)); reid=cur.lastrowid
+            for line in lines:
+                c.execute("""INSERT INTO payroll_run_lines(run_employee_id,component_id,component_code,component_name,component_type,amount,taxable,statutory,source,gl_account,liability_account)
+                  VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(reid,line['component_id'] if 'component_id' in line else line['id'],line['code'],line.get('component_name') or line.get('name'),line['component_type'],line['amount'],line['taxable'],line['statutory'],line['source'],line.get('gl_account'),line.get('liability_account')))
+            totals['gross']+=summary['gross_pay'];totals['deductions']+=summary['deductions'];totals['net']+=summary['net_pay'];totals['employer']+=summary['employer_cost']
+        c.execute('UPDATE payroll_runs SET employee_count=?,gross_pay=?,total_deductions=?,net_pay=?,employer_cost=? WHERE id=?',(len(all_results),money(totals['gross']),money(totals['deductions']),money(totals['net']),money(totals['employer']),run_id))
+        c.execute("UPDATE payroll_periods SET status='Processing' WHERE id=?",(period_id,))
+    audit(u['username'],'PREVIEW','payroll_run',run_id,f'period={period_id}; employees={len(all_results)}')
+    return RedirectResponse('/payroll',303)
+
+@app.post('/payroll/runs/{run_id}/finalize')
+def payroll_run_finalize(run_id:int,request:Request,variance_threshold:float=Form(20)):
+    u=require(request,PAYROLL_ROLES)
+    run=q('SELECT r.*,p.period_code,p.end_date FROM payroll_runs r JOIN payroll_periods p ON p.id=r.period_id WHERE r.id=?',(run_id,),True)
+    if not run: raise HTTPException(404,'Payroll run not found')
+    errors=[]
+    if run['validation_errors']: errors.append(run['validation_errors'])
+    large=q('SELECT COUNT(*) n FROM payroll_run_employees WHERE run_id=? AND previous_net_pay>0 AND ABS(variance_percent)>?',(run_id,variance_threshold),True)['n']
+    if large: errors.append(f'{large} employee(s) exceed the {variance_threshold}% variance threshold')
+    unmapped=q("""SELECT COUNT(*) n FROM payroll_run_lines l JOIN payroll_run_employees e ON e.id=l.run_employee_id WHERE e.run_id=? AND (
+      (l.component_type IN ('Earning','Reimbursement') AND (l.gl_account IS NULL OR l.gl_account='')) OR
+      (l.component_type='Deduction' AND COALESCE(l.liability_account,l.gl_account,'')='') OR
+      (l.component_type='Employer Cost' AND ((l.gl_account IS NULL OR l.gl_account='') OR (l.liability_account IS NULL OR l.liability_account='')))
+      )""",(run_id,),True)['n']
+    if unmapped: errors.append(f'{unmapped} payroll line(s) lack a GL account mapping')
+    if errors:
+        execq('UPDATE payroll_runs SET validation_errors=? WHERE id=?',('\n'.join(errors),run_id))
+        raise HTTPException(400,'Payroll run has unresolved validation errors')
+    with conn() as c:
+        c.execute("UPDATE payroll_runs SET status='Finalized',finalized_at=CURRENT_TIMESTAMP WHERE id=? AND status='Preview'",(run_id,))
+        c.execute("UPDATE payroll_periods SET status='Finalized' WHERE id=?",(run['period_id'],))
+        for row in c.execute('SELECT id,employee_id FROM payroll_run_employees WHERE run_id=?',(run_id,)).fetchall():
+            c.execute("INSERT INTO payslips(run_employee_id,payslip_no,status,published_at) VALUES(?,?, 'Published',CURRENT_TIMESTAMP)",(row['id'],f"{run['period_code']}-{row['employee_id']:05d}"))
+    audit(u['username'],'FINALIZE','payroll_run',run_id,f'variance threshold={variance_threshold}%')
+    return RedirectResponse('/payroll',303)
+
+@app.get('/payroll/payslips/{run_employee_id}',response_class=HTMLResponse)
+def payslip_view(run_employee_id:int,request:Request):
+    u=require(request)
+    item=q("""SELECT x.*,e.employee_no,e.first_name||' '||e.last_name employee,e.work_email,p.period_code,p.start_date,p.end_date,p.pay_date,
+      s.name structure,ps.payslip_no,ps.status payslip_status FROM payroll_run_employees x JOIN payroll_runs r ON r.id=x.run_id
+      JOIN payroll_periods p ON p.id=r.period_id JOIN employees e ON e.id=x.employee_id LEFT JOIN employee_compensation c ON c.id=x.compensation_id
+      LEFT JOIN salary_structures s ON s.id=c.structure_id LEFT JOIN payslips ps ON ps.run_employee_id=x.id WHERE x.id=?""",(run_employee_id,),True)
+    if not item: raise HTTPException(404,'Payslip not found')
+    if u['role'] not in PAYROLL_ROLES and item['employee_id']!=u['employee_id']: raise HTTPException(403)
+    lines=q('SELECT * FROM payroll_run_lines WHERE run_employee_id=? ORDER BY component_type,component_code',(run_employee_id,))
+    return page(request,'payslip.html',item=item,lines=lines)
+
+@app.get('/payroll/runs/{run_id}/accounting.csv')
+def payroll_accounting_export(run_id:int,request:Request):
+    u=require(request,PAYROLL_ROLES)
+    run=q('SELECT * FROM payroll_runs WHERE id=? AND status=?',(run_id,'Finalized'),True)
+    if not run: raise HTTPException(400,'Only finalized payroll can be exported')
+    detail=q("""SELECT l.component_name,l.component_type,l.gl_account,l.liability_account,SUM(l.amount) amount
+      FROM payroll_run_lines l JOIN payroll_run_employees e ON e.id=l.run_employee_id WHERE e.run_id=?
+      GROUP BY l.component_name,l.component_type,l.gl_account,l.liability_account ORDER BY l.component_type,l.component_name""",(run_id,))
+    rows=[]
+    for line in detail:
+        if line['component_type'] in ('Earning','Reimbursement'):
+            rows.append({'account':line['gl_account'] or 'UNMAPPED','description':line['component_name'],'debit':money(line['amount']),'credit':0})
+        elif line['component_type']=='Deduction':
+            rows.append({'account':line['liability_account'] or line['gl_account'] or 'UNMAPPED','description':line['component_name'],'debit':0,'credit':money(line['amount'])})
+        elif line['component_type']=='Employer Cost':
+            rows.append({'account':line['gl_account'] or 'UNMAPPED','description':line['component_name']+' expense','debit':money(line['amount']),'credit':0})
+            rows.append({'account':line['liability_account'] or 'UNMAPPED','description':line['component_name']+' liability','debit':0,'credit':money(line['amount'])})
+    net_account=q("SELECT value FROM settings WHERE key='payroll_net_pay_liability_account'",one=True)
+    rows.append({'account':net_account['value'] if net_account else 'PAYROLL-NET-PAY','description':'Net pay liability','debit':0,'credit':run['net_pay']})
+    debit=money(sum(x['debit'] for x in rows));credit=money(sum(x['credit'] for x in rows))
+    balanced=abs(debit-credit)<0.01
+    export_id=execq('INSERT INTO payroll_accounting_exports(run_id,total_debits,total_credits,balanced,exported_by) VALUES(?,?,?,?,?)',(run_id,debit,credit,int(balanced),u['id']))
+    if not balanced: raise HTTPException(400,f'Accounting export is not balanced: debit {debit}, credit {credit}')
+    out=io.StringIO();w=csv.DictWriter(out,fieldnames=['account','description','debit','credit']);w.writeheader();w.writerows(rows)
+    audit(u['username'],'EXPORT','payroll_accounting',export_id,f'debits={debit}; credits={credit}')
+    return StreamingResponse(iter([out.getvalue()]),media_type='text/csv',headers={'Content-Disposition':f'attachment; filename=payroll-accounting-run-{run_id}.csv'})
+
+@app.get('/api/v1/payroll-periods')
+def api_payroll_periods(request:Request): require(request,PAYROLL_ROLES); return q('SELECT * FROM payroll_periods ORDER BY start_date DESC')
+
+@app.get('/api/v1/payroll-runs')
+def api_payroll_runs(request:Request): require(request,PAYROLL_ROLES); return q('SELECT * FROM payroll_runs ORDER BY id DESC')
+
+@app.get('/api/v1/payslips')
+def api_payslips(request:Request):
+    u=require(request); where='' if u['role'] in PAYROLL_ROLES else ' WHERE e.employee_id=?';args=() if not where else (u['employee_id'],)
+    return q('SELECT p.*,e.employee_id,e.net_pay FROM payslips p JOIN payroll_run_employees e ON e.id=p.run_employee_id'+where+' ORDER BY p.id DESC',args)
+
+@app.post('/payroll/components/{cid}/mapping')
+def payroll_component_mapping(cid:int,request:Request,gl_account:str=Form(...),liability_account:str=Form(''),statutory_rule_name:str=Form('')):
+    u=require(request,PAYROLL_ROLES)
+    execq('UPDATE pay_components SET gl_account=?,liability_account=?,statutory_rule_name=CASE WHEN ?=\'\' THEN statutory_rule_name ELSE ? END WHERE id=?',(gl_account,liability_account or None,statutory_rule_name,statutory_rule_name,cid))
+    audit(u['username'],'MAP','pay_component',cid,gl_account)
+    return RedirectResponse('/payroll',303)

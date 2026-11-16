@@ -16,3 +16,7 @@ Workforce operations remain in the shared modular monolith. Effective-dated work
 
 ## v0.4 talent module
 Talent remains inside the modular monolith and reuses employee, manager, department, identity and audit data. Performance cycles provide the time boundary; participants connect employees and managers to self, manager, calibrated and final outcomes. Goals preserve parent alignment and append-only progress updates. Feedback requests and responses separate workflow state from content and apply visibility filtering in application queries. Skills and competencies use reusable libraries with employee evidence. Development plans own measurable actions. Calibration sessions preserve proposed and calibrated ratings, buckets, rationale and risk flags without overwriting the manager-review evidence.
+
+
+## v0.5 payroll beta module
+Payroll remains in the modular monolith and consumes employee, compensation, attendance, reimbursement, identity and audit records. Configuration is separated into component definitions, statutory rule versions, salary structures and effective-dated employee compensation. Payroll previews snapshot employee totals and component lines so finalized payslips and accounting exports remain traceable even when later configuration changes. Statutory rule versions are effective-dated and validation-gated. Finalization performs calculation, mapping and variance controls; accounting export independently proves debit-credit balance.

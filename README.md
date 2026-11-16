@@ -1,11 +1,20 @@
-# PeaWork v0.4.0  
-India-first HRIS for 50–2,000 employee organizations. v0.4 adds complete talent and performance workflows to the delivered people, hire-to-onboard and workforce foundation while keeping one FastAPI/Jinja application core for local, Docker and future cloud deployment.  
+# PeaWork v0.5.0  
+India-first HRIS for 50–2,000 employee organizations. v0.5 adds a validation-gated India payroll beta to the delivered people, hire-to-onboard, workforce and talent foundation while keeping one FastAPI/Jinja application core for local, Docker and future cloud deployment.  
 ## Included  
 ### HR foundation  
 - Secure login, PBKDF2 password hashing, role-based access and audit events  
 - Employee master, effective-dated hire history, departments, positions and manager relationships  
 - Leave requests and approvals, India holiday calendar, document register and CSV export  
 - Operational dashboard, reports, REST API, SQLite local mode and Docker local-server mode  
+### v0.5 India payroll beta
+- Configurable earnings, deductions, reimbursements and employer costs
+- Effective-dated salary structures and employee compensation
+- Attendance-linked payable days and loss-of-pay proration
+- Approved variable inputs, arrears, recoveries and reimbursements
+- Payroll preview, prior-period variance checks and finalization controls
+- Employee payslips and debit-credit-balanced accounting export
+- Validation gates for statutory components; no statutory rates are represented as filing-ready
+
 ### v0.4 Talent
 - Performance cycles, participants and review deadlines
 - Weighted goals/OKRs with alignment, metrics and update history
@@ -81,5 +90,8 @@ Interactive documentation: `/docs`
 - `GET /api/v1/goals`
 - `GET /api/v1/feedback-requests`
 - `GET /api/v1/skills`
-- `GET /api/v1/development-plans`  
-See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`.
+- `GET /api/v1/development-plans`
+- `GET /api/v1/payroll-periods`
+- `GET /api/v1/payroll-runs`
+- `GET /api/v1/payslips`  
+See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`.

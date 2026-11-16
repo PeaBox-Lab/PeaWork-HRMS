@@ -60,3 +60,20 @@ Payroll calculations, statutory filings, biometric devices, recruiting, performa
 13. HR can finalize the participant rating and summary after calibration.
 14. Talent APIs require a valid authorized session.
 15. Existing v0.3 databases receive the v0.4 schema without destructive migration.
+
+## v0.5 acceptance criteria
+1. Payroll can define earnings, deductions, reimbursements and employer-cost components with GL mappings.
+2. Statutory components identify an effective rule version and cannot finalize without qualified validation.
+3. Payroll can create reusable salary structures with fixed, percent-CTC, percent-component and input calculations.
+4. Employees can receive effective-dated compensation assignments.
+5. Payroll can define periods and synchronize attendance/payable-day inputs from Workforce.
+6. Authorized users can enter and approve variable pay, arrears, recoveries and adjustments.
+7. Employees can submit reimbursement claims and authorized roles can decide them.
+8. Payroll preview calculates gross pay, deductions, net pay and employer cost with two-decimal rounding.
+9. Preview compares employee net pay to the latest finalized prior period.
+10. Finalization blocks unresolved calculation errors, unvalidated statutory rules, missing accounting mappings and variance exceptions above the selected threshold.
+11. Finalization publishes one payslip per calculated employee.
+12. Employees can view only their own payslips; payroll roles can view all.
+13. Accounting export identifies debits and credits and is delivered only when balanced.
+14. Payroll APIs require an authorized session.
+15. Existing v0.4 databases receive the v0.5 schema without destructive migration.

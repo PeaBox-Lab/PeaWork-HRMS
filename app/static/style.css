@@ -2,3 +2,5 @@
 .checkgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.checkgrid label{font-weight:500}.checkgrid input{width:auto;margin-right:5px}.pill.late,.pill.blocked{background:#fff0c9;color:#805b00}.pill.absent,.pill.rejected{background:#fae1e1;color:#973737}.pill.submitted,.pill.remote{background:#e5ebff;color:#334a99}
 
 .progress{height:9px;background:#edf1ef;border-radius:8px;overflow:hidden;margin:9px 0}.progress i{display:block;height:100%;background:var(--pea);border-radius:8px}.pill.at-risk,.pill.concerned{background:#fae1e1;color:#973737}.pill.calibration,.pill.calibrated{background:#e5ebff;color:#334a99}
+
+.warning{background:#fff6dc;color:#664d00;margin-bottom:18px}.error-text{color:var(--red);white-space:pre-line}.net-pay{display:flex;justify-content:space-between;align-items:center;background:#edf6f1;padding:18px;border-radius:10px;margin:20px 0}.net-pay b{font-size:28px}.payslip{max-width:1000px;margin:auto}@media print{aside,header button{display:none}main{margin:0;padding:0}.card{box-shadow:none;border:0}}

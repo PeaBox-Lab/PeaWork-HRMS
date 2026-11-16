@@ -1,0 +1,15 @@
+{
+  "rule_name": "[Qualified specialist to specify]",
+  "jurisdiction": "India",
+  "effective_from": "YYYY-MM-DD",
+  "parameters": {
+    "calculation_type": "Percent Component",
+    "base_component_code": "[COMPONENT_CODE]",
+    "rate": "[VALIDATED_RATE]",
+    "threshold": "[VALIDATED_THRESHOLD_IF_APPLICABLE]",
+    "ceiling": "[VALIDATED_CEILING_IF_APPLICABLE]"
+  },
+  "validation_status": "Draft",
+  "validated_by": "",
+  "notes": "Must be reviewed and marked Validated by a qualified payroll/tax specialist before use."
+}

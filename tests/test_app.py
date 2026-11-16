@@ -129,3 +129,69 @@ def test_talent_apis_require_authentication():
     with client() as c:
         for path in ['/api/v1/performance-cycles','/api/v1/goals','/api/v1/feedback-requests','/api/v1/skills','/api/v1/development-plans']:
             assert c.get(path,follow_redirects=False).status_code in (303,307)
+
+
+
+def test_complete_payroll_beta_workflow():
+    with authenticated_client() as c:
+        basic=q("SELECT id FROM pay_components WHERE code='BASIC'",one=True)['id']
+        hra=q("SELECT id FROM pay_components WHERE code='HRA'",one=True)['id']
+        special=q("SELECT id FROM pay_components WHERE code='SPECIAL'",one=True)['id']
+        arrear=q("SELECT id FROM pay_components WHERE code='ARREAR'",one=True)['id']
+        reimb=q("SELECT id FROM pay_components WHERE code='REIMB'",one=True)['id']
+        otherded=q("SELECT id FROM pay_components WHERE code='OTHERDED'",one=True)['id']
+        for cid,gl,liab in [(basic,'6000-BASIC',''),(hra,'6001-HRA',''),(special,'6002-SPECIAL',''),(arrear,'6003-ARREAR',''),(reimb,'6004-REIMB',''),(otherded,'','2100-OTHERDED')]:
+            assert c.post(f'/payroll/components/{cid}/mapping',data={'gl_account':gl or liab,'liability_account':liab,'statutory_rule_name':''},follow_redirects=False).status_code==303
+        from app.main import execq
+        execq("INSERT INTO settings(key,value) VALUES('payroll_net_pay_liability_account','2200-NET-PAY') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        assert c.post('/payroll/structures',data={'name':'Monthly CTC Structure','code':'MONTHLY','description':'Test structure'},follow_redirects=False).status_code==303
+        sid=q("SELECT id FROM salary_structures WHERE code='MONTHLY'",one=True)['id']
+        lines=[(basic,'Percent CTC','',50,''),(hra,'Percent Component','',40,'BASIC'),(special,'Percent CTC','',30,''),(arrear,'Input','','',''),(reimb,'Input','','',''),(otherded,'Input','','','')]
+        for cid,calc,amount,rate,base in lines:
+            data={'component_id':cid,'calculation_type':calc,'base_component_code':base}
+            if amount!='': data['amount']=amount
+            if rate!='': data['rate']=rate
+            assert c.post(f'/payroll/structures/{sid}/lines',data=data,follow_redirects=False).status_code==303
+        assert c.post('/payroll/compensation',data={'employee_id':'1','structure_id':sid,'annual_ctc':'1200000','effective_from':'2027-01-01'},follow_redirects=False).status_code==303
+        assert c.post('/payroll/compensation',data={'employee_id':'2','structure_id':sid,'annual_ctc':'600000','effective_from':'2027-01-01'},follow_redirects=False).status_code==303
+        assert c.post('/payroll/periods',data={'period_code':'2027-01','start_date':'2027-01-01','end_date':'2027-01-31','pay_date':'2027-01-31','working_days':'22'},follow_redirects=False).status_code==303
+        period=q("SELECT id FROM payroll_periods WHERE period_code='2027-01'",one=True)['id']
+        assert c.post('/payroll/attendance/sync',data={'period_id':period},follow_redirects=False).status_code==303
+        assert c.post('/payroll/inputs',data={'period_id':period,'employee_id':'1','component_id':arrear,'input_type':'Arrear','amount':'5000','description':'Prior correction'},follow_redirects=False).status_code==303
+        inp=q('SELECT MAX(id) id FROM payroll_inputs',one=True)['id']; assert c.post(f'/payroll/inputs/{inp}/approve',follow_redirects=False).status_code==303
+        assert c.post('/payroll/inputs',data={'period_id':period,'employee_id':'1','component_id':otherded,'input_type':'Recovery','amount':'1000','description':'Advance recovery'},follow_redirects=False).status_code==303
+        inp=q('SELECT MAX(id) id FROM payroll_inputs',one=True)['id']; assert c.post(f'/payroll/inputs/{inp}/approve',follow_redirects=False).status_code==303
+        assert c.post('/payroll/reimbursements',data={'employee_id':'1','period_id':period,'category':'Travel','amount':'2000','description':'Client visit'},follow_redirects=False).status_code==303
+        claim=q('SELECT MAX(id) id FROM reimbursement_claims',one=True)['id']; assert c.post(f'/payroll/reimbursements/{claim}/decision',data={'decision':'approve'},follow_redirects=False).status_code==303
+        assert c.post('/payroll/runs',data={'period_id':period},follow_redirects=False).status_code==303
+        run=q('SELECT MAX(id) id FROM payroll_runs',one=True)['id']
+        summary=q('SELECT * FROM payroll_runs WHERE id=?',(run,),True)
+        assert summary['employee_count']==2 and summary['gross_pay']>summary['net_pay']
+        assert c.post(f'/payroll/runs/{run}/finalize',data={'variance_threshold':'100'},follow_redirects=False).status_code==303
+        assert q('SELECT status FROM payroll_runs WHERE id=?',(run,),True)['status']=='Finalized'
+        assert q('SELECT COUNT(*) n FROM payslips',one=True)['n']==2
+        export=c.get(f'/payroll/runs/{run}/accounting.csv')
+        assert export.status_code==200 and 'Net pay liability' in export.text
+        check=q('SELECT * FROM payroll_accounting_exports WHERE run_id=?',(run,),True)
+        assert check['balanced']==1 and check['total_debits']==check['total_credits']
+
+
+def test_unvalidated_statutory_rule_blocks_finalization():
+    with authenticated_client() as c:
+        assert c.post('/payroll/components',data={'code':'TESTSTAT','name':'Test Statutory','component_type':'Deduction','calculation_type':'Percent Component','base_component_code':'BASIC','default_rate':'1','statutory':'1','statutory_rule_name':'TEST RULE','liability_account':'2100-TEST','display_order':'99'},follow_redirects=False).status_code==303
+        stat=q("SELECT id FROM pay_components WHERE code='TESTSTAT'",one=True)['id']
+        sid=q("SELECT id FROM salary_structures WHERE code='MONTHLY'",one=True)['id']
+        assert c.post(f'/payroll/structures/{sid}/lines',data={'component_id':stat,'calculation_type':'Percent Component','rate':'1','base_component_code':'BASIC'},follow_redirects=False).status_code==303
+        assert c.post('/payroll/periods',data={'period_code':'2027-02','start_date':'2027-02-01','end_date':'2027-02-28','pay_date':'2027-02-28','working_days':'20'},follow_redirects=False).status_code==303
+        period=q("SELECT id FROM payroll_periods WHERE period_code='2027-02'",one=True)['id']
+        assert c.post('/payroll/attendance/sync',data={'period_id':period},follow_redirects=False).status_code==303
+        assert c.post('/payroll/runs',data={'period_id':period},follow_redirects=False).status_code==303
+        run=q('SELECT MAX(id) id FROM payroll_runs',one=True)['id']
+        assert 'lacks a validated effective rule' in q('SELECT validation_errors FROM payroll_runs WHERE id=?',(run,),True)['validation_errors']
+        assert c.post(f'/payroll/runs/{run}/finalize',data={'variance_threshold':'100'},follow_redirects=False).status_code==400
+
+
+def test_payroll_apis_require_authentication():
+    with client() as c:
+        for path in ['/api/v1/payroll-periods','/api/v1/payroll-runs','/api/v1/payslips']:
+            assert c.get(path,follow_redirects=False).status_code in (303,307)

@@ -244,6 +244,101 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback_requests(requested_from_employee_id,status);
     CREATE INDEX IF NOT EXISTS idx_development_actions_due ON development_actions(due_date,status);
     CREATE INDEX IF NOT EXISTS idx_calibration_cycle ON calibration_sessions(cycle_id,status);
+
+    CREATE TABLE IF NOT EXISTS pay_components(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT UNIQUE NOT NULL,
+      component_type TEXT NOT NULL, calculation_type TEXT DEFAULT 'Fixed',
+      base_component_code TEXT, default_rate REAL, taxable INTEGER DEFAULT 1,
+      statutory INTEGER DEFAULT 0, statutory_rule_name TEXT, active INTEGER DEFAULT 1,
+      gl_account TEXT, liability_account TEXT, display_order INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS statutory_rule_versions(
+      id INTEGER PRIMARY KEY, rule_name TEXT NOT NULL, jurisdiction TEXT DEFAULT 'India',
+      effective_from TEXT NOT NULL, effective_to TEXT, parameters_json TEXT NOT NULL,
+      validation_status TEXT DEFAULT 'Draft', validated_by TEXT, validated_at TEXT,
+      notes TEXT, UNIQUE(rule_name,effective_from)
+    );
+    CREATE TABLE IF NOT EXISTS salary_structures(
+      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, code TEXT UNIQUE NOT NULL,
+      description TEXT, active INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS salary_structure_lines(
+      id INTEGER PRIMARY KEY, structure_id INTEGER NOT NULL, component_id INTEGER NOT NULL,
+      calculation_type TEXT DEFAULT 'Fixed', amount REAL, rate REAL,
+      base_component_code TEXT, employer_cost INTEGER DEFAULT 0,
+      UNIQUE(structure_id,component_id)
+    );
+    CREATE TABLE IF NOT EXISTS employee_compensation(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, structure_id INTEGER NOT NULL,
+      annual_ctc REAL, effective_from TEXT NOT NULL, effective_to TEXT,
+      pay_frequency TEXT DEFAULT 'Monthly', status TEXT DEFAULT 'Active',
+      UNIQUE(employee_id,effective_from)
+    );
+    CREATE TABLE IF NOT EXISTS employee_component_overrides(
+      id INTEGER PRIMARY KEY, compensation_id INTEGER NOT NULL, component_id INTEGER NOT NULL,
+      amount REAL, rate REAL, notes TEXT, UNIQUE(compensation_id,component_id)
+    );
+    CREATE TABLE IF NOT EXISTS payroll_periods(
+      id INTEGER PRIMARY KEY, period_code TEXT UNIQUE NOT NULL, start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL, pay_date TEXT NOT NULL, status TEXT DEFAULT 'Open',
+      working_days REAL, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS payroll_inputs(
+      id INTEGER PRIMARY KEY, period_id INTEGER NOT NULL, employee_id INTEGER NOT NULL,
+      component_id INTEGER NOT NULL, input_type TEXT DEFAULT 'Variable', amount REAL NOT NULL,
+      description TEXT, source TEXT DEFAULT 'Manual', approved INTEGER DEFAULT 0,
+      approved_by INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS payroll_attendance_inputs(
+      id INTEGER PRIMARY KEY, period_id INTEGER NOT NULL, employee_id INTEGER NOT NULL,
+      payable_days REAL NOT NULL, loss_of_pay_days REAL DEFAULT 0,
+      overtime_hours REAL DEFAULT 0, source TEXT DEFAULT 'Workforce',
+      UNIQUE(period_id,employee_id)
+    );
+    CREATE TABLE IF NOT EXISTS reimbursement_claims(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, period_id INTEGER,
+      category TEXT NOT NULL, amount REAL NOT NULL, description TEXT,
+      status TEXT DEFAULT 'Pending', approved_by INTEGER, approved_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS payroll_runs(
+      id INTEGER PRIMARY KEY, period_id INTEGER NOT NULL, run_number INTEGER NOT NULL DEFAULT 1,
+      status TEXT DEFAULT 'Draft', employee_count INTEGER DEFAULT 0,
+      gross_pay REAL DEFAULT 0, total_deductions REAL DEFAULT 0,
+      net_pay REAL DEFAULT 0, employer_cost REAL DEFAULT 0,
+      validation_errors TEXT, created_by INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      finalized_at TEXT, UNIQUE(period_id,run_number)
+    );
+    CREATE TABLE IF NOT EXISTS payroll_run_employees(
+      id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, employee_id INTEGER NOT NULL,
+      compensation_id INTEGER, payable_days REAL, loss_of_pay_days REAL DEFAULT 0,
+      gross_pay REAL DEFAULT 0, deductions REAL DEFAULT 0, net_pay REAL DEFAULT 0,
+      employer_cost REAL DEFAULT 0, previous_net_pay REAL DEFAULT 0,
+      net_variance REAL DEFAULT 0, variance_percent REAL DEFAULT 0,
+      status TEXT DEFAULT 'Calculated', errors TEXT, UNIQUE(run_id,employee_id)
+    );
+    CREATE TABLE IF NOT EXISTS payroll_run_lines(
+      id INTEGER PRIMARY KEY, run_employee_id INTEGER NOT NULL, component_id INTEGER NOT NULL,
+      component_code TEXT NOT NULL, component_name TEXT NOT NULL,
+      component_type TEXT NOT NULL, amount REAL NOT NULL,
+      taxable INTEGER DEFAULT 1, statutory INTEGER DEFAULT 0,
+      source TEXT, gl_account TEXT, liability_account TEXT
+    );
+    CREATE TABLE IF NOT EXISTS payslips(
+      id INTEGER PRIMARY KEY, run_employee_id INTEGER UNIQUE NOT NULL,
+      payslip_no TEXT UNIQUE NOT NULL, generated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      published_at TEXT, status TEXT DEFAULT 'Generated'
+    );
+    CREATE TABLE IF NOT EXISTS payroll_accounting_exports(
+      id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, export_type TEXT DEFAULT 'Summary',
+      total_debits REAL NOT NULL, total_credits REAL NOT NULL,
+      balanced INTEGER NOT NULL, exported_by INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_period_status ON payroll_periods(status,pay_date);
+    CREATE INDEX IF NOT EXISTS idx_payroll_inputs_period ON payroll_inputs(period_id,employee_id);
+    CREATE INDEX IF NOT EXISTS idx_payroll_run_employee ON payroll_run_employees(run_id,employee_id);
+    CREATE INDEX IF NOT EXISTS idx_payroll_lines_employee ON payroll_run_lines(run_employee_id,component_type);
     """  
     with conn() as c:  
         c.executescript(schema)
