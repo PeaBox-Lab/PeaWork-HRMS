@@ -1,0 +1,13 @@
+services:
+  peawork:
+    build: .
+    ports: ["8080:8080"]
+    volumes:
+      - peawork_data:/app/data
+      - peawork_uploads:/app/uploads
+    environment:
+      PEAWORK_ENV: local-server
+      PEAWORK_SECRET: ${PEAWORK_SECRET:-replace-before-production}
+volumes:
+  peawork_data:
+  peawork_uploads:
