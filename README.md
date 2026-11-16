@@ -1,6 +1,6 @@
-# PeaWork v0.2.0
+# PeaWork v0.3.0
 
-India-first HRIS for 50–2,000 employee organizations. v0.2 extends the delivered people foundation with a complete hire-to-onboard workflow while keeping one FastAPI/Jinja application core for local, Docker and future cloud deployment.
+India-first HRIS for 50–2,000 employee organizations. v0.3 adds complete workforce operations to the delivered people and hire-to-onboard foundation while keeping one FastAPI/Jinja application core for local, Docker and future cloud deployment.
 
 ## Included
 
@@ -9,6 +9,16 @@ India-first HRIS for 50–2,000 employee organizations. v0.2 extends the deliver
 - Employee master, effective-dated hire history, departments, positions and manager relationships
 - Leave requests and approvals, India holiday calendar, document register and CSV export
 - Operational dashboard, reports, REST API, SQLite local mode and Docker local-server mode
+
+### v0.3 Workforce
+- Shifts, weekly-off patterns and effective-dated employee assignments
+- Attendance with calculated worked/overtime hours and duplicate-safe daily upserts
+- Overtime requests and approvals
+- Weekly timesheets, project/activity entries, submission, correction and approval
+- Biometric device register, CSV import and authenticated punch API
+- Transactional monthly leave accrual jobs with duplicate-run protection
+- Monthly manager calendar combining attendance and leave events
+- One-click Windows setup that remains visible and launches the application
 
 ### v0.2 Hire-to-onboard
 - Requisitions with openings, target dates, hiring managers and lifecycle status
@@ -24,11 +34,15 @@ India-first HRIS for 50–2,000 employee organizations. v0.2 extends the deliver
 
 ## Run locally
 
-### Windows
+### Windows — one-click setup
+1. Double-click `install.bat`.
+2. The setup window remains open and reports any installation failure.
+3. After successful setup, press a key to launch the server and open PeaWork in your browser.
+4. For later use, double-click `start_peawork.bat`; installation is not repeated.
+
+Command-line alternative:
 ```bat
-install_local.bat
-.venv\Scripts\activate
-python run.py
+install.bat
 ```
 
 ### Linux/macOS
@@ -66,5 +80,9 @@ Interactive documentation: `/docs`
 - `GET /api/v1/candidates`
 - `GET /api/v1/applications`
 - `GET /api/v1/onboardings`
+- `GET /api/v1/attendance`
+- `GET /api/v1/shifts`
+- `GET /api/v1/timesheets`
+- `POST /api/v1/biometric-punch`
 
-See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`.
+See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, and `docs/V03_WORKFORCE.md`.

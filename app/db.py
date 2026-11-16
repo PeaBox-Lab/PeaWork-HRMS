@@ -91,6 +91,67 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_applications_stage ON applications(stage,status);
     CREATE INDEX IF NOT EXISTS idx_interviews_schedule ON interviews(scheduled_at,status);
     CREATE INDEX IF NOT EXISTS idx_onboarding_tasks_due ON onboarding_tasks(due_date,status);
+
+    CREATE TABLE IF NOT EXISTS shifts(
+      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, code TEXT UNIQUE NOT NULL,
+      start_time TEXT NOT NULL, end_time TEXT NOT NULL, break_minutes INTEGER DEFAULT 60,
+      grace_minutes INTEGER DEFAULT 10, minimum_hours REAL DEFAULT 8, active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS weekly_offs(
+      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, monday INTEGER DEFAULT 0,
+      tuesday INTEGER DEFAULT 0, wednesday INTEGER DEFAULT 0, thursday INTEGER DEFAULT 0,
+      friday INTEGER DEFAULT 0, saturday INTEGER DEFAULT 0, sunday INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS employee_work_patterns(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, shift_id INTEGER NOT NULL,
+      weekly_off_id INTEGER, effective_from TEXT NOT NULL, effective_to TEXT,
+      UNIQUE(employee_id,effective_from)
+    );
+    CREATE TABLE IF NOT EXISTS attendance_records(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, attendance_date TEXT NOT NULL,
+      shift_id INTEGER, check_in TEXT, check_out TEXT, worked_hours REAL DEFAULT 0,
+      overtime_hours REAL DEFAULT 0, status TEXT DEFAULT 'Present', source TEXT DEFAULT 'Manual',
+      notes TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(employee_id,attendance_date)
+    );
+    CREATE TABLE IF NOT EXISTS overtime_requests(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, attendance_date TEXT NOT NULL,
+      requested_hours REAL NOT NULL, reason TEXT, status TEXT DEFAULT 'Pending',
+      approver_employee_id INTEGER, approver_comment TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      decided_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS timesheets(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, week_start TEXT NOT NULL,
+      status TEXT DEFAULT 'Draft', submitted_at TEXT, approver_employee_id INTEGER,
+      approver_comment TEXT, decided_at TEXT, UNIQUE(employee_id,week_start)
+    );
+    CREATE TABLE IF NOT EXISTS timesheet_entries(
+      id INTEGER PRIMARY KEY, timesheet_id INTEGER NOT NULL, work_date TEXT NOT NULL,
+      project_code TEXT, activity TEXT NOT NULL, hours REAL NOT NULL, notes TEXT,
+      UNIQUE(timesheet_id,work_date,project_code,activity)
+    );
+    CREATE TABLE IF NOT EXISTS biometric_devices(
+      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, device_code TEXT UNIQUE NOT NULL,
+      location TEXT, active INTEGER DEFAULT 1, last_sync_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS biometric_imports(
+      id INTEGER PRIMARY KEY, filename TEXT, device_id INTEGER, imported_by INTEGER,
+      rows_received INTEGER DEFAULT 0, rows_imported INTEGER DEFAULT 0,
+      rows_rejected INTEGER DEFAULT 0, errors TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS leave_accrual_runs(
+      id INTEGER PRIMARY KEY, period TEXT NOT NULL, leave_type_id INTEGER NOT NULL,
+      amount_per_employee REAL NOT NULL, employees_processed INTEGER DEFAULT 0,
+      total_accrued REAL DEFAULT 0, status TEXT DEFAULT 'Completed', run_by INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(period,leave_type_id)
+    );
+    CREATE TABLE IF NOT EXISTS leave_accrual_entries(
+      id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, employee_id INTEGER NOT NULL,
+      leave_balance_id INTEGER NOT NULL, amount REAL NOT NULL, UNIQUE(run_id,employee_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_records(attendance_date,status);
+    CREATE INDEX IF NOT EXISTS idx_timesheets_week ON timesheets(week_start,status);
+    CREATE INDEX IF NOT EXISTS idx_overtime_status ON overtime_requests(status,attendance_date);
     """
     with conn() as c:
         c.executescript(schema)

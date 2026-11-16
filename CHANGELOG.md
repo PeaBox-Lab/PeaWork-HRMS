@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 - Workforce
+- Fixed Windows setup so installation errors remain visible and successful setup launches PeaWork.
+- Added a reusable daily `start_peawork.bat` launcher.
+- Added shifts, weekly-off patterns and effective-dated employee work assignments.
+- Added attendance upserts with worked-hours and overtime calculation.
+- Added overtime requests and manager/HR decisions.
+- Added weekly timesheets, entries, submission, correction and approval.
+- Added biometric device registration, CSV import and authenticated punch API.
+- Added transactional monthly leave accrual jobs with duplicate-run protection.
+- Added a manager calendar combining attendance and leave events.
+- Added workforce APIs, tests, acceptance criteria and operating documentation.
+
 ## 0.2.0 - Hire-to-onboard
 - Added requisitions, candidates and candidate-to-requisition applications.
 - Added controlled recruitment stages, interviews, scorecards and recommendations.

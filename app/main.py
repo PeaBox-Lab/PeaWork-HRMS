@@ -8,7 +8,7 @@ import csv,io,json,os,shutil
 from .db import conn,init_db  
 from .security import hash_password,verify_password,token,untoken  
 BASE=Path(__file__).resolve().parent.parent; UPLOADS=BASE/'uploads'; UPLOADS.mkdir(exist_ok=True)  
-app=FastAPI(title='PeaWork HRIS',version='0.2.0',description='India-first local and cloud-ready HRIS')  
+app=FastAPI(title='PeaWork HRIS',version='0.3.0',description='India-first local and cloud-ready HRIS')  
 app.mount('/static',StaticFiles(directory=BASE/'app'/'static'),name='static'); templates=Jinja2Templates(directory=BASE/'app'/'templates')  
 def q(sql,args=(),one=False):  
     with conn() as c:  
@@ -56,13 +56,17 @@ def seed():
         ('Probation confirmation review','Probation','manager',85),
     ]:
         execq('INSERT INTO onboarding_task_templates(journey_id,title,category,owner_role,due_offset_days) VALUES(?,?,?,?,?)',(journey,title,category,owner,offset))
-    audit('system','SEED','database','','Demo organization initialized with v0.2 onboarding journey')  
+    shift=execq('INSERT INTO shifts(name,code,start_time,end_time,break_minutes,grace_minutes,minimum_hours) VALUES(?,?,?,?,?,?,?)',('General Shift','GEN','09:30','18:30',60,10,8))
+    weekly=execq('INSERT INTO weekly_offs(name,saturday,sunday) VALUES(?,?,?)',('Saturday and Sunday',1,1))
+    execq('INSERT INTO employee_work_patterns(employee_id,shift_id,weekly_off_id,effective_from) VALUES(?,?,?,?)',(e1,shift,weekly,'2024-04-01'))
+    execq('INSERT INTO employee_work_patterns(employee_id,shift_id,weekly_off_id,effective_from) VALUES(?,?,?,?)',(e2,shift,weekly,'2025-01-15'))
+    audit('system','SEED','database','','Demo organization initialized through v0.3 workforce')  
 @app.exception_handler(401)  
 async def unauthorized(request,exc): return RedirectResponse('/login?error=Please+sign+in',303)  
 @app.exception_handler(403)  
 async def forbidden(request,exc): return page(request,'error.html',code=403,message='You do not have access to this action.')  
 @app.get('/health')  
-def health(): return {'status':'ok','version':'0.2.0','deployment':os.getenv('PEAWORK_ENV','local')}  
+def health(): return {'status':'ok','version':'0.3.0','deployment':os.getenv('PEAWORK_ENV','local')}  
 @app.get('/login',response_class=HTMLResponse)  
 def login_page(request:Request,error:str=''): return page(request,'login.html',error=error)  
 @app.post('/login')  
@@ -80,7 +84,7 @@ def logout(request:Request):
 @app.get('/',response_class=HTMLResponse)  
 def dashboard(request:Request):  
     u=require(request)  
-    stats={'employees':q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n'],'departments':q('SELECT COUNT(*) n FROM departments WHERE active=1',one=True)['n'],'pending':q("SELECT COUNT(*) n FROM leave_requests WHERE status='Pending'",one=True)['n'],'documents':q('SELECT COUNT(*) n FROM documents',one=True)['n'],'open_requisitions':q("SELECT COUNT(*) n FROM requisitions WHERE status='Open'",one=True)['n'],'active_candidates':q("SELECT COUNT(*) n FROM applications WHERE status='Active'",one=True)['n'],'onboarding':q("SELECT COUNT(*) n FROM onboardings WHERE status IN ('Planned','In Progress')",one=True)['n']}  
+    stats={'employees':q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n'],'departments':q('SELECT COUNT(*) n FROM departments WHERE active=1',one=True)['n'],'pending':q("SELECT COUNT(*) n FROM leave_requests WHERE status='Pending'",one=True)['n'],'documents':q('SELECT COUNT(*) n FROM documents',one=True)['n'],'open_requisitions':q("SELECT COUNT(*) n FROM requisitions WHERE status='Open'",one=True)['n'],'active_candidates':q("SELECT COUNT(*) n FROM applications WHERE status='Active'",one=True)['n'],'onboarding':q("SELECT COUNT(*) n FROM onboardings WHERE status IN ('Planned','In Progress')",one=True)['n'],'present_today':q("SELECT COUNT(*) n FROM attendance_records WHERE attendance_date=? AND status IN ('Present','Late','Half Day')",(date.today().isoformat(),),True)['n'],'pending_timesheets':q("SELECT COUNT(*) n FROM timesheets WHERE status='Submitted'",one=True)['n']}  
     recent=q('SELECT e.employee_no,e.first_name,e.last_name,d.name department,e.date_of_joining FROM employees e LEFT JOIN departments d ON d.id=e.department_id ORDER BY e.id DESC LIMIT 6')  
     leaves=q("SELECT l.id,e.first_name||' '||e.last_name employee,t.name type,l.start_date,l.end_date,l.days,l.status FROM leave_requests l JOIN employees e ON e.id=l.employee_id JOIN leave_types t ON t.id=l.leave_type_id ORDER BY l.id DESC LIMIT 6")  
     return page(request,'dashboard.html',stats=stats,recent=recent,leaves=leaves)  
@@ -402,3 +406,236 @@ def api_applications(request:Request): require(request, ['admin','hr','recruiter
 
 @app.get('/api/v1/onboardings')
 def api_onboardings(request:Request): require(request, ['admin','hr','recruiter','manager']); return q('SELECT * FROM onboardings ORDER BY id DESC')
+
+# ----------------------------- v0.3 Workforce ------------------------------
+WORKFORCE_MANAGER_ROLES = ['admin','hr','manager']
+
+def normalize_punch(day, value):
+    if value and len(value)<=5: return f'{day}T{value}'
+    return value
+
+def worked_hours(check_in, check_out, break_minutes=0):
+    if not check_in or not check_out:
+        return 0
+    start=datetime.fromisoformat(check_in)
+    end=datetime.fromisoformat(check_out)
+    if end < start: end += timedelta(days=1)
+    return round(max(0,(end-start).total_seconds()/3600-(break_minutes or 0)/60),2)
+
+def workforce_context(u, month):
+    try:
+        first=datetime.strptime(month+'-01','%Y-%m-%d').date()
+    except ValueError:
+        first=date.today().replace(day=1); month=first.strftime('%Y-%m')
+    next_month=(first.replace(day=28)+timedelta(days=4)).replace(day=1)
+    start,end=first.isoformat(),next_month.isoformat()
+    broad=u['role'] in WORKFORCE_MANAGER_ROLES
+    emp_filter='' if broad else ' AND a.employee_id=?'
+    emp_args=() if broad else (u['employee_id'],)
+    attendance=q("""SELECT a.*,e.employee_no,e.first_name||' '||e.last_name employee,s.name shift
+      FROM attendance_records a JOIN employees e ON e.id=a.employee_id LEFT JOIN shifts s ON s.id=a.shift_id
+      WHERE a.attendance_date>=? AND a.attendance_date<?"""+emp_filter+" ORDER BY a.attendance_date DESC,e.first_name",(start,end)+emp_args)
+    timesheet_filter='' if broad else ' WHERE t.employee_id=?'
+    timesheet_args=() if broad else (u['employee_id'],)
+    return {
+      'month':month,
+      'employees':q("SELECT id,employee_no,first_name||' '||last_name name FROM employees WHERE status='Active' ORDER BY first_name"),
+      'shifts':q('SELECT * FROM shifts WHERE active=1 ORDER BY name'),
+      'weekly_offs':q('SELECT * FROM weekly_offs ORDER BY name'),
+      'patterns':q("""SELECT w.*,e.employee_no,e.first_name||' '||e.last_name employee,s.name shift,o.name weekly_off
+        FROM employee_work_patterns w JOIN employees e ON e.id=w.employee_id JOIN shifts s ON s.id=w.shift_id
+        LEFT JOIN weekly_offs o ON o.id=w.weekly_off_id ORDER BY w.effective_from DESC"""),
+      'attendance':attendance,
+      'overtime':q("""SELECT o.*,e.first_name||' '||e.last_name employee,a.first_name||' '||a.last_name approver
+        FROM overtime_requests o JOIN employees e ON e.id=o.employee_id LEFT JOIN employees a ON a.id=o.approver_employee_id
+        WHERE (? IN ('admin','hr','manager') OR o.employee_id=?) ORDER BY o.id DESC""",(u['role'],u['employee_id'])),
+      'timesheets':q("""SELECT t.*,e.first_name||' '||e.last_name employee,
+        COALESCE((SELECT SUM(x.hours) FROM timesheet_entries x WHERE x.timesheet_id=t.id),0) total_hours
+        FROM timesheets t JOIN employees e ON e.id=t.employee_id"""+timesheet_filter+' ORDER BY t.week_start DESC,t.id DESC',timesheet_args),
+      'entries':q("""SELECT x.*,e.first_name||' '||e.last_name employee FROM timesheet_entries x
+        JOIN timesheets t ON t.id=x.timesheet_id JOIN employees e ON e.id=t.employee_id
+        WHERE (? IN ('admin','hr','manager') OR t.employee_id=?) ORDER BY x.work_date DESC,x.id DESC""",(u['role'],u['employee_id'])),
+      'devices':q('SELECT * FROM biometric_devices ORDER BY name'),
+      'imports':q('SELECT * FROM biometric_imports ORDER BY id DESC LIMIT 20'),
+      'accruals':q("""SELECT r.*,l.name leave_type,u.username run_by_name FROM leave_accrual_runs r
+        JOIN leave_types l ON l.id=r.leave_type_id LEFT JOIN users u ON u.id=r.run_by ORDER BY r.id DESC"""),
+      'leave_types':q('SELECT * FROM leave_types WHERE active=1 ORDER BY name'),
+      'calendar':q("""SELECT a.attendance_date event_date,e.first_name||' '||e.last_name employee,
+        'Attendance: '||a.status event_type,a.check_in detail FROM attendance_records a JOIN employees e ON e.id=a.employee_id
+        WHERE a.attendance_date>=? AND a.attendance_date<?
+        UNION ALL SELECT l.start_date,e.first_name||' '||e.last_name,'Leave: '||l.status,t.name
+        FROM leave_requests l JOIN employees e ON e.id=l.employee_id JOIN leave_types t ON t.id=l.leave_type_id
+        WHERE l.start_date<? AND l.end_date>=? ORDER BY event_date,employee""",(start,end,end,start)),
+    }
+
+@app.get('/workforce',response_class=HTMLResponse)
+def workforce(request:Request,month:str=''):
+    u=require(request); month=month or date.today().strftime('%Y-%m')
+    return page(request,'workforce.html',**workforce_context(u,month))
+
+@app.post('/workforce/shifts')
+def shift_create(request:Request,name:str=Form(...),code:str=Form(...),start_time:str=Form(...),end_time:str=Form(...),break_minutes:int=Form(60),grace_minutes:int=Form(10),minimum_hours:float=Form(8)):
+    u=require(request,['admin','hr'])
+    sid=execq('INSERT INTO shifts(name,code,start_time,end_time,break_minutes,grace_minutes,minimum_hours) VALUES(?,?,?,?,?,?,?)',(name,code.upper(),start_time,end_time,max(0,break_minutes),max(0,grace_minutes),max(0,minimum_hours)))
+    audit(u['username'],'CREATE','shift',sid,code)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/weekly-offs')
+def weekly_off_create(request:Request,name:str=Form(...),monday:int=Form(0),tuesday:int=Form(0),wednesday:int=Form(0),thursday:int=Form(0),friday:int=Form(0),saturday:int=Form(0),sunday:int=Form(0)):
+    u=require(request,['admin','hr'])
+    wid=execq('INSERT INTO weekly_offs(name,monday,tuesday,wednesday,thursday,friday,saturday,sunday) VALUES(?,?,?,?,?,?,?,?)',(name,int(bool(monday)),int(bool(tuesday)),int(bool(wednesday)),int(bool(thursday)),int(bool(friday)),int(bool(saturday)),int(bool(sunday))))
+    audit(u['username'],'CREATE','weekly_off',wid,name)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/patterns')
+def work_pattern_create(request:Request,employee_id:int=Form(...),shift_id:int=Form(...),weekly_off_id:int|None=Form(None),effective_from:str=Form(...),effective_to:str=Form('')):
+    u=require(request,['admin','hr'])
+    pid=execq('INSERT INTO employee_work_patterns(employee_id,shift_id,weekly_off_id,effective_from,effective_to) VALUES(?,?,?,?,?)',(employee_id,shift_id,weekly_off_id,effective_from,effective_to or None))
+    audit(u['username'],'ASSIGN','work_pattern',pid,f'employee={employee_id}')
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/attendance')
+def attendance_upsert(request:Request,employee_id:int=Form(...),attendance_date:str=Form(...),shift_id:int|None=Form(None),check_in:str=Form(''),check_out:str=Form(''),status:str=Form('Present'),notes:str=Form('')):
+    u=require(request)
+    if u['role']=='employee' and employee_id!=u['employee_id']: raise HTTPException(403)
+    shift=q('SELECT * FROM shifts WHERE id=?',(shift_id,),True) if shift_id else None
+    hours=worked_hours(check_in,check_out,shift['break_minutes'] if shift else 0)
+    overtime=max(0,round(hours-(shift['minimum_hours'] if shift else 8),2))
+    execq("""INSERT INTO attendance_records(employee_id,attendance_date,shift_id,check_in,check_out,worked_hours,overtime_hours,status,source,notes)
+      VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(employee_id,attendance_date) DO UPDATE SET shift_id=excluded.shift_id,check_in=excluded.check_in,
+      check_out=excluded.check_out,worked_hours=excluded.worked_hours,overtime_hours=excluded.overtime_hours,status=excluded.status,
+      source=excluded.source,notes=excluded.notes,updated_at=CURRENT_TIMESTAMP""",(employee_id,attendance_date,shift_id,check_in or None,check_out or None,hours,overtime,status,'Manual',notes))
+    row=q('SELECT id FROM attendance_records WHERE employee_id=? AND attendance_date=?',(employee_id,attendance_date),True)
+    audit(u['username'],'UPSERT','attendance',row['id'],f'{attendance_date}; hours={hours}')
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/overtime')
+def overtime_request(request:Request,employee_id:int=Form(...),attendance_date:str=Form(...),requested_hours:float=Form(...),reason:str=Form('')):
+    u=require(request)
+    if u['role']=='employee' and employee_id!=u['employee_id']: raise HTTPException(403)
+    oid=execq('INSERT INTO overtime_requests(employee_id,attendance_date,requested_hours,reason) VALUES(?,?,?,?)',(employee_id,attendance_date,max(0,requested_hours),reason))
+    audit(u['username'],'CREATE','overtime_request',oid,reason)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/overtime/{oid}/decision')
+def overtime_decision(oid:int,request:Request,decision:str=Form(...),comment:str=Form('')):
+    u=require(request,WORKFORCE_MANAGER_ROLES)
+    status='Approved' if decision=='approve' else 'Rejected'
+    execq('UPDATE overtime_requests SET status=?,approver_employee_id=?,approver_comment=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',(status,u['employee_id'],comment,oid,'Pending'))
+    audit(u['username'],status.upper(),'overtime_request',oid,comment)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/timesheets')
+def timesheet_create(request:Request,employee_id:int=Form(...),week_start:str=Form(...)):
+    u=require(request)
+    if u['role']=='employee' and employee_id!=u['employee_id']: raise HTTPException(403)
+    tid=execq("INSERT INTO timesheets(employee_id,week_start,status) VALUES(?,?,'Draft')",(employee_id,week_start))
+    audit(u['username'],'CREATE','timesheet',tid,week_start)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/timesheets/{tid}/entries')
+def timesheet_entry(tid:int,request:Request,work_date:str=Form(...),project_code:str=Form(''),activity:str=Form(...),hours:float=Form(...),notes:str=Form('')):
+    u=require(request)
+    ts=q('SELECT * FROM timesheets WHERE id=?',(tid,),True)
+    if not ts or ts['status'] not in ['Draft','Rejected']: raise HTTPException(400,'Only draft or rejected timesheets can be edited')
+    if u['role']=='employee' and ts['employee_id']!=u['employee_id']: raise HTTPException(403)
+    eid=execq('INSERT INTO timesheet_entries(timesheet_id,work_date,project_code,activity,hours,notes) VALUES(?,?,?,?,?,?)',(tid,work_date,project_code or None,activity,max(0,min(24,hours)),notes))
+    audit(u['username'],'CREATE','timesheet_entry',eid,activity)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/timesheets/{tid}/submit')
+def timesheet_submit(tid:int,request:Request):
+    u=require(request)
+    ts=q('SELECT * FROM timesheets WHERE id=?',(tid,),True)
+    if not ts or (u['role']=='employee' and ts['employee_id']!=u['employee_id']): raise HTTPException(403)
+    total=q('SELECT COALESCE(SUM(hours),0) n FROM timesheet_entries WHERE timesheet_id=?',(tid,),True)['n']
+    if total<=0: raise HTTPException(400,'Add at least one entry before submitting')
+    execq("UPDATE timesheets SET status='Submitted',submitted_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('Draft','Rejected')",(tid,))
+    audit(u['username'],'SUBMIT','timesheet',tid,f'hours={total}')
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/timesheets/{tid}/decision')
+def timesheet_decision(tid:int,request:Request,decision:str=Form(...),comment:str=Form('')):
+    u=require(request,WORKFORCE_MANAGER_ROLES)
+    status='Approved' if decision=='approve' else 'Rejected'
+    execq('UPDATE timesheets SET status=?,approver_employee_id=?,approver_comment=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',(status,u['employee_id'],comment,tid,'Submitted'))
+    audit(u['username'],status.upper(),'timesheet',tid,comment)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/biometric/devices')
+def biometric_device(request:Request,name:str=Form(...),device_code:str=Form(...),location:str=Form('')):
+    u=require(request,['admin','hr'])
+    did=execq('INSERT INTO biometric_devices(name,device_code,location) VALUES(?,?,?)',(name,device_code.upper(),location))
+    audit(u['username'],'CREATE','biometric_device',did,device_code)
+    return RedirectResponse('/workforce',303)
+
+@app.post('/workforce/biometric/import')
+def biometric_import(request:Request,device_id:int|None=Form(None),file:UploadFile=File(...)):
+    u=require(request,['admin','hr'])
+    raw=file.file.read().decode('utf-8-sig'); rows=list(csv.DictReader(io.StringIO(raw)))
+    imported=0; errors=[]
+    for line,row in enumerate(rows,2):
+        try:
+            emp=q('SELECT id FROM employees WHERE employee_no=?',(row.get('employee_no','').strip(),),True)
+            if not emp: raise ValueError('employee not found')
+            day=row.get('attendance_date','').strip(); cin=normalize_punch(day,row.get('check_in','').strip()); cout=normalize_punch(day,row.get('check_out','').strip())
+            if not day: raise ValueError('attendance_date missing')
+            hours=worked_hours(cin,cout,0)
+            execq("""INSERT INTO attendance_records(employee_id,attendance_date,check_in,check_out,worked_hours,overtime_hours,status,source)
+              VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(employee_id,attendance_date) DO UPDATE SET check_in=excluded.check_in,check_out=excluded.check_out,
+              worked_hours=excluded.worked_hours,overtime_hours=excluded.overtime_hours,status=excluded.status,source=excluded.source,updated_at=CURRENT_TIMESTAMP""",
+              (emp['id'],day,cin or None,cout or None,hours,max(0,round(hours-8,2)),row.get('status','Present') or 'Present','Biometric'))
+            imported+=1
+        except Exception as e: errors.append(f'row {line}: {e}')
+    iid=execq('INSERT INTO biometric_imports(filename,device_id,imported_by,rows_received,rows_imported,rows_rejected,errors) VALUES(?,?,?,?,?,?,?)',(file.filename,device_id,u['id'],len(rows),imported,len(errors),'\n'.join(errors[:50])))
+    if device_id: execq('UPDATE biometric_devices SET last_sync_at=CURRENT_TIMESTAMP WHERE id=?',(device_id,))
+    audit(u['username'],'IMPORT','biometric_import',iid,f'{imported}/{len(rows)} rows')
+    return RedirectResponse('/workforce',303)
+
+@app.post('/api/v1/biometric-punch')
+def api_biometric_punch(request:Request,employee_no:str=Form(...),attendance_date:str=Form(...),check_in:str=Form(''),check_out:str=Form(''),device_code:str=Form('API')):
+    u=require(request,['admin','hr'])
+    emp=q('SELECT id FROM employees WHERE employee_no=?',(employee_no,),True)
+    if not emp: raise HTTPException(404,'Employee not found')
+    check_in=normalize_punch(attendance_date,check_in); check_out=normalize_punch(attendance_date,check_out)
+    hours=worked_hours(check_in,check_out,0)
+    execq("""INSERT INTO attendance_records(employee_id,attendance_date,check_in,check_out,worked_hours,overtime_hours,status,source)
+      VALUES(?,?,?,?,?,?,'Present',?) ON CONFLICT(employee_id,attendance_date) DO UPDATE SET check_in=excluded.check_in,check_out=excluded.check_out,
+      worked_hours=excluded.worked_hours,overtime_hours=excluded.overtime_hours,source=excluded.source,updated_at=CURRENT_TIMESTAMP""",
+      (emp['id'],attendance_date,check_in or None,check_out or None,hours,max(0,round(hours-8,2)),f'API:{device_code}'))
+    audit(u['username'],'PUNCH','attendance',employee_no,attendance_date)
+    return {'status':'ok','employee_no':employee_no,'attendance_date':attendance_date,'worked_hours':hours}
+
+@app.post('/workforce/leave-accruals/run')
+def leave_accrual_run(request:Request,period:str=Form(...),leave_type_id:int=Form(...),amount_per_employee:float|None=Form(None)):
+    u=require(request,['admin','hr'])
+    lt=q('SELECT * FROM leave_types WHERE id=? AND active=1',(leave_type_id,),True)
+    if not lt: raise HTTPException(404,'Leave type not found')
+    amount=round(amount_per_employee if amount_per_employee is not None else lt['annual_entitlement']/12,4)
+    if q('SELECT id FROM leave_accrual_runs WHERE period=? AND leave_type_id=?',(period,leave_type_id),True):
+        raise HTTPException(400,'This leave type has already been accrued for the selected period')
+    year=int(period[:4])
+    with conn() as c:
+        run=c.execute("INSERT INTO leave_accrual_runs(period,leave_type_id,amount_per_employee,run_by,status) VALUES(?,?,?,?,'Running')",(period,leave_type_id,amount,u['id'])).lastrowid
+        employees=c.execute("SELECT id FROM employees WHERE status='Active'").fetchall(); total=0
+        for emp in employees:
+            c.execute("INSERT INTO leave_balances(employee_id,leave_type_id,year,opening,accrued,used) VALUES(?,?,?,0,0,0) ON CONFLICT(employee_id,leave_type_id,year) DO NOTHING",(emp['id'],leave_type_id,year))
+            bal=c.execute('SELECT id FROM leave_balances WHERE employee_id=? AND leave_type_id=? AND year=?',(emp['id'],leave_type_id,year)).fetchone()[0]
+            c.execute('UPDATE leave_balances SET accrued=accrued+? WHERE id=?',(amount,bal))
+            c.execute('INSERT INTO leave_accrual_entries(run_id,employee_id,leave_balance_id,amount) VALUES(?,?,?,?)',(run,emp['id'],bal,amount)); total+=amount
+        c.execute("UPDATE leave_accrual_runs SET employees_processed=?,total_accrued=?,status='Completed' WHERE id=?",(len(employees),round(total,4),run))
+    audit(u['username'],'RUN','leave_accrual',run,f'{period}; amount={amount}')
+    return RedirectResponse('/workforce',303)
+
+@app.get('/api/v1/attendance')
+def api_attendance(request:Request):
+    u=require(request); where='' if u['role'] in WORKFORCE_MANAGER_ROLES else ' WHERE employee_id=?'; args=() if not where else (u['employee_id'],)
+    return q('SELECT * FROM attendance_records'+where+' ORDER BY attendance_date DESC,id DESC',args)
+
+@app.get('/api/v1/shifts')
+def api_shifts(request:Request): require(request); return q('SELECT * FROM shifts WHERE active=1 ORDER BY name')
+
+@app.get('/api/v1/timesheets')
+def api_timesheets(request:Request):
+    u=require(request); where='' if u['role'] in WORKFORCE_MANAGER_ROLES else ' WHERE employee_id=?'; args=() if not where else (u['employee_id'],)
+    return q('SELECT * FROM timesheets'+where+' ORDER BY week_start DESC,id DESC',args)

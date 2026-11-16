@@ -12,3 +12,7 @@ For the 50–2,000 employee target, a modular monolith lowers deployment and tra
 
 ## v0.2 modules
 The recruitment and onboarding workflows remain inside the modular monolith and share the existing identity, organization, employee, notification and audit infrastructure. New domain tables isolate requisitions, candidates, applications, interviews, offers, journey templates, onboarding instances, onboarding tasks and probation reviews. Candidate conversion uses one SQLite transaction so employee creation and recruitment closure cannot diverge.
+
+
+## v0.3 workforce module
+Workforce operations remain in the shared modular monolith. Effective-dated work patterns join employees to shifts and weekly-off definitions. Attendance is unique by employee/date so manual, CSV and API sources converge on one record. Timesheet headers control submission and approval while dated entries preserve project/activity detail. Leave accrual runs and entries provide run-level traceability; each leave type can run only once per period, and balance changes occur in the same database transaction.

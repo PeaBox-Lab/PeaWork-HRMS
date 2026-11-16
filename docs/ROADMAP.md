@@ -3,8 +3,8 @@
 People master, organization, positions, effective-dated hire event, leave workflow, document register, dashboards, reports, API, RBAC basics, audit, SQLite and Docker.  
 ## v0.2 Hire-to-onboard, delivered  
 Requisitions, candidate pipeline, interview scorecards, offers, configurable onboarding journeys, tasks, probation and employee conversion. Delivered in v0.2.0 as the complete functional MVP workflow.  
-## v0.3 Workforce, 6–8 weeks  
-Attendance, shifts, weekly offs, overtime, timesheets, biometric import/API, leave accrual jobs and manager calendar.  
+## v0.3 Workforce, delivered  
+Attendance, shifts, weekly offs, overtime, timesheets, biometric import/API, leave accrual jobs and manager calendar. Delivered in v0.3.0 as the complete functional MVP workflow.  
 ## v0.4 Talent, 8–10 weeks  
 Goals/OKRs, performance cycles, check-ins, 360 feedback, skills, competencies, development plans and calibration.  
 ## v0.5 India payroll beta, 10–14 weeks  
