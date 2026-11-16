@@ -7,20 +7,25 @@ os.environ['PEAWORK_SECRET'] = 'test-secret'
 control_fd, control_path = tempfile.mkstemp(suffix='.db'); os.close(control_fd)
 os.environ['PEAWORK_CONTROL_DATABASE'] = control_path
 os.environ['PEAWORK_TENANT_DATABASE_ROOT'] = tempfile.mkdtemp(prefix='peawork-tenants-')  
-from app.main import app, q, seed  
-from app.db import init_db  
-def client():  
-    init_db()  
-    if not q('SELECT id FROM users LIMIT 1', one=True):  
-        seed()  
-    return TestClient(app)  
-def login(c):  
+from app.main import app, q, seed
+from app.db import init_db
+from app.cloud_control import init_control_db
+class CSRFClient(TestClient):
+    def post(self,url,*args,**kwargs):
+        if not self.cookies.get('peawork_csrf'):self.get('/login')
+        data=dict(kwargs.pop('data',{}) or {});data.setdefault('_csrf',self.cookies.get('peawork_csrf'));kwargs['data']=data
+        return super().post(url,*args,**kwargs)
+def client():
+    init_control_db();init_db()
+    if not q('SELECT id FROM users LIMIT 1', one=True):seed()
+    return CSRFClient(app)
+def login(c):
     return c.post('/login', data={'username':'admin','password':'ChangeMe123!'}, follow_redirects=False)  
 def authenticated_client():  
     c=client(); r=login(c); assert r.status_code==303; c.cookies.update(r.cookies); return c  
 def test_health():  
     with client() as c:  
-        assert c.get('/health').json()=={'status':'ok','version':'0.2.0','deployment':'local'}  
+        data=c.get('/health').json();assert data['status']=='ok' and data['version']=='1.0.0' and data['deployment']=='local'  
 def test_auth_and_dashboard():  
     with authenticated_client() as c:  
         assert c.get('/').status_code==200  
@@ -262,3 +267,52 @@ def test_cloud_apis_require_control_admin():
     with client() as c:
         for endpoint in ['/api/v1/cloud/tenants','/api/v1/cloud/service-checks']:
             assert c.get(endpoint,follow_redirects=False).status_code in (303,307)
+
+
+def test_security_headers_csrf_and_session_revocation():
+    from app.cloud_control import control_conn
+    with client() as c:
+        landing=c.get('/login');assert landing.status_code==200 and c.cookies.get('peawork_csrf')
+        rejected=TestClient(app).post('/login',data={'username':'admin','password':'ChangeMe123!'},follow_redirects=False)
+        assert rejected.status_code==403
+        r=login(c);c.cookies.update(r.cookies);assert r.status_code==303
+        page=c.get('/');assert page.status_code==200
+        assert page.headers['x-frame-options']=='DENY' and page.headers['x-content-type-options']=='nosniff' and 'frame-ancestors' in page.headers['content-security-policy']
+        raw=c.cookies.get('peawork_session')
+        assert c.post('/logout',follow_redirects=False).status_code==303
+        with control_conn() as db:assert db.execute("SELECT COUNT(*) n FROM session_registry WHERE revoked_at IS NOT NULL").fetchone()['n']>=1
+        c.cookies.set('peawork_session',raw);assert c.get('/',follow_redirects=False).status_code in (303,307)
+
+
+def test_login_throttling_and_upload_validation():
+    from app.main import record_login_attempt,login_throttled
+    for _ in range(5):record_login_attempt('blocked-user','127.0.0.9',False)
+    assert login_throttled('blocked-user','127.0.0.9')
+    import io
+    from app.storage import validated_stream
+    try:validated_stream(io.BytesIO(b'bad'),'malware.exe','application/octet-stream');raise AssertionError('extension accepted')
+    except ValueError:pass
+    stream,size=validated_stream(io.BytesIO(b'clean'),'evidence.txt','text/plain');assert size==5;stream.close()
+
+
+def test_privacy_and_readiness_evidence_gates():
+    from app.cloud_control import control_conn,init_control_db
+    init_control_db()
+    with control_conn() as db:
+        tenant=db.execute("SELECT id FROM tenants WHERE slug='local'").fetchone()['id']
+        db.execute("INSERT INTO retention_policies(tenant_id,data_category,retention_days,status,approved_by) VALUES(?,'Notifications',30,'Approved','Privacy Officer') ON CONFLICT(tenant_id,data_category) DO UPDATE SET status='Approved',approved_by='Privacy Officer'",(tenant,))
+        request_id=db.execute("INSERT INTO privacy_requests(tenant_id,request_type,data_subject,received_on) VALUES(?,'Access','subject-1','2026-11-16')",(tenant,)).lastrowid
+        gate=db.execute("SELECT id FROM readiness_evidence WHERE control_code='SEC-PENTEST'").fetchone()['id']
+    with authenticated_client() as c:
+        assert c.post(f'/privacy/requests/{request_id}/update',data={'identity_status':'Pending','status':'Completed','decision':'Provide export','evidence':'case-1'},follow_redirects=False).status_code==400
+        assert c.post(f'/privacy/requests/{request_id}/update',data={'identity_status':'Verified','status':'Completed','decision':'Provide export','evidence':'case-1'},follow_redirects=False).status_code==303
+        assert c.post(f'/readiness/evidence/{gate}',data={'status':'Verified','evidence_reference':'','reviewed_by':'','notes':''},follow_redirects=False).status_code==400
+        assert c.post(f'/readiness/evidence/{gate}',data={'status':'Verified','evidence_reference':'PEN-2026-01','reviewed_by':'Independent Tester','notes':'Scope attached'},follow_redirects=False).status_code==303
+
+
+def test_password_hash_upgrade_and_locale():
+    from app.security import hash_password,verify_password
+    value=hash_password('StrongPassword!');assert value.startswith('pbkdf2_sha256$600000$') and verify_password('StrongPassword!',value)
+    with authenticated_client() as c:
+        assert c.post('/locale',data={'locale':'hi'},follow_redirects=False).status_code==303
+        assert c.cookies.get('peawork_locale')=='hi'

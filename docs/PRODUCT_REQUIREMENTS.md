@@ -95,3 +95,23 @@ Payroll calculations, statutory filings, biometric devices, recruiting, performa
 14. Migration supports isolated SQLite destinations and PostgreSQL tenant schemas.
 15. Cloud APIs require a control-tenant administrator.
 16. Existing v0.5 local operation remains available on port 8090.
+
+
+## v1.0 acceptance criteria
+1. Unsafe browser requests require a valid session-bound CSRF token.
+2. Cloud/production responses use secure cookies, HSTS and hardened browser headers.
+3. Sessions are tenant-bound, registered server-side, expiring and revocable.
+4. Failed login attempts are throttled and create durable security evidence.
+5. Password hashes are versioned and legacy hashes upgrade after successful authentication.
+6. Uploads enforce file extension, content type and size; production can require fail-closed malware scanning.
+7. Cloud/production startup rejects default secrets and bootstrap passwords.
+8. Retention jobs operate only on approved, non-held policies and preserve run counts/evidence.
+9. Privacy requests cannot complete without verified identity and evidence.
+10. Breach incidents cannot close without containment and notification rationale.
+11. The shell supports keyboard navigation, visible focus, reduced motion and English/Hindi locale selection.
+12. Accessibility findings retain severity, status, owner and resolution evidence.
+13. Completed DR exercises require verified restore evidence, actual RPO/RTO and approver.
+14. Load-test records retain approved concurrency context, errors and latency percentiles.
+15. Production readiness remains false until all required external/internal evidence gates are Verified.
+16. Open high/critical security events block the readiness command.
+17. Existing v0.6 tenant, PostgreSQL, storage and migration behavior remains available on port 8090.

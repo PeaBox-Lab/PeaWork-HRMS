@@ -1,11 +1,21 @@
-# PeaWork v0.6.0  
-India-first HRIS for 50–2,000 employee organizations. v0.6 adds a tenant-isolated cloud beta to the delivered people, hire-to-onboard, workforce, talent and payroll foundation while preserving local operation.  
+# PeaWork v1.0.0  
+India-first HRIS for 50–2,000 employee organizations. v1.0 adds production-readiness controls and evidence gates to the tenant-isolated cloud, people, hire-to-onboard, workforce, talent and payroll foundation.  
 ## Included  
 ### HR foundation  
 - Secure login, PBKDF2 password hashing, role-based access and audit events  
 - Employee master, effective-dated hire history, departments, positions and manager relationships  
 - Leave requests and approvals, India holiday calendar, document register and CSV export  
 - Operational dashboard, reports, REST API, SQLite local mode and Docker local-server mode  
+### v1.0 Production hardening candidate
+- CSRF, secure response headers, login throttling and revocable tenant-bound sessions
+- Versioned password hashing and default-secret/bootstrap startup gates
+- Upload type/MIME/size controls and fail-closed malware-scanner option
+- Retention policies, legal holds, data-subject requests, grievance and breach workflows
+- English/Hindi shell localization and global accessibility improvements
+- Accessibility findings, DR exercises and load-test evidence records
+- Eight evidence-based production gates for independent security, privacy, accessibility, localization, resilience and performance review
+- Readiness command that fails while evidence is missing or high-risk events remain open
+
 ### v0.6 Cloud beta
 - Separate cloud control plane and cloud audit trail
 - Database-per-tenant SQLite and schema-per-tenant PostgreSQL isolation
@@ -108,7 +118,7 @@ Interactive documentation: `/docs`
 - `GET /api/v1/cloud/service-checks`
 - `POST /scim/v2/Users`
 - `GET /metrics`  
-See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`, and `docs/V06_CLOUD_BETA.md`.
+See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`, and `docs/V06_CLOUD_BETA.md`, `docs/V10_PRODUCTION_HARDENING.md`, and `docs/PRODUCTION_CONTROLS.md`.
 
 
 ## Cloud beta quick start
@@ -121,3 +131,14 @@ python scripts/create_object_bucket.py
 ```
 
 Run `python scripts/cloud_preflight.py` in the configured application environment before opening cloud access. The cloud beta records SSO, domain, TLS and PITR orchestration state but requires provider integration and independent validation before production use.
+
+
+## Production readiness
+
+The repository is a production-hardening candidate, not a self-certified production release. Configure approved secrets and scanning, complete independent assessments and operational exercises, attach evidence in Production Readiness, then run:
+
+```bash
+python scripts/readiness_check.py
+```
+
+The command exits unsuccessfully until every required gate is verified and no open high/critical security event remains.

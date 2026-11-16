@@ -1,0 +1,9 @@
+control_code,title,category,required_reviewer,status,evidence_reference,exceptions,reviewed_by,reviewed_at
+SEC-ASVS-L2,OWASP ASVS Level 2 independent verification,Security,Independent Security Assessor,Pending,,,,
+SEC-PENTEST,External penetration test,Security,Independent Penetration Tester,Pending,,,,
+SEC-SAST,SAST and dependency scan,Security,Security Engineering,Pending,,,,
+A11Y-AA,Accessibility audit against WCAG AA,Accessibility,Accessibility Specialist,Pending,,,,
+L10N-REVIEW,Localization and language review,Localization,Localization Reviewer,Pending,,,,
+DR-RESTORE,Disaster-recovery restore exercise,Resilience,Business Continuity Owner,Pending,,,,
+PERF-LOAD,Load test to approved concurrency,Performance,Performance Engineering,Pending,,,,
+PRIV-DPDP,DPDP workflows and notices validated,Privacy,Qualified Privacy Counsel,Pending,,,,

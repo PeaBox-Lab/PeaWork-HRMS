@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0 - Production hardening candidate
+- Added strict CSRF protection and hardened browser response headers.
+- Added versioned password hashing, legacy upgrade and login throttling.
+- Added server-side tenant-bound session expiry and revocation.
+- Added upload allow-lists, size controls and fail-closed malware scan integration.
+- Added cloud/production default-secret and bootstrap-password startup gates.
+- Added retention policies, legal holds, retention-run evidence and conservative deletion rules.
+- Added data-subject request, grievance and breach-response workflows.
+- Added English/Hindi shell localization, skip navigation, focus visibility and reduced-motion handling.
+- Added accessibility findings, DR exercise and load-test evidence workflows.
+- Added eight evidence-based production-release gates and readiness command.
+- Added load-test, dependency-inventory and readiness scripts plus production controls documentation.
+
 ## 0.6.0 - Cloud beta
 - Added a separate cloud control plane and audit trail.
 - Added database/schema-per-tenant isolation and tenant-bound sessions.

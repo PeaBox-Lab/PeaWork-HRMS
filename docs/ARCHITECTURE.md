@@ -24,3 +24,7 @@ Payroll remains in the modular monolith and consumes employee, compensation, att
 
 ## v0.6 cloud control plane
 Cloud beta separates global control metadata from tenant application data. The control database stores tenant identity, domains, subscriptions, identity-provider metadata, hashed SCIM credentials, storage settings, backup policies, service checks, migration jobs and cloud audit events. Domain data uses database-per-tenant SQLite for local cloud simulation and schema-per-tenant PostgreSQL for the cloud target. Request context selects one tenant before any domain query executes. Session signatures include the tenant slug. Upload storage keys are tenant-prefixed. The migration assistant copies or loads a complete local SQLite population into one isolated destination.
+
+
+## v1.0 production control layer
+Production hardening adds a request security middleware, server-side session registry, login-attempt and security-event evidence, privacy/retention workflows, breach records, readiness evidence, accessibility findings, DR exercises and load-test results. Control-plane records remain separate from tenant HR data. Release approval is evidence-based: the application can enforce technical controls, but independent assessments and qualified review remain explicit gates rather than self-attested flags.

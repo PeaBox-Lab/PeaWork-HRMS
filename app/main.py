@@ -7,12 +7,36 @@ from datetime import date,datetime,timedelta
 from decimal import Decimal, ROUND_HALF_UP    
 import csv,io,json,os,shutil,secrets,sqlite3,time    
 from .db import conn,init_db,set_tenant,reset_tenant,current_tenant,tenant_db_path    
-from .security import hash_password,verify_password,token,untoken
+from .security import hash_password,verify_password,token,untoken,csrf_token,verify_csrf
 from .cloud_control import control_conn,init_control_db,clean_slug,issue_scim_token,hash_token,cloud_audit,resolve_tenant
-from .storage import store_upload    
+from .storage import store_upload
+from .i18n import translate    
 BASE=Path(__file__).resolve().parent.parent; UPLOADS=BASE/'uploads'; UPLOADS.mkdir(exist_ok=True)    
-app=FastAPI(title='PeaWork HRIS',version='0.6.0',description='India-first local and cloud-ready HRIS')    
+app=FastAPI(title='PeaWork HRIS',version='1.0.0',description='India-first production-readiness candidate HRIS')    
 app.mount('/static',StaticFiles(directory=BASE/'app'/'static'),name='static'); templates=Jinja2Templates(directory=BASE/'app'/'templates')
+SAFE_METHODS={'GET','HEAD','OPTIONS'}
+CSRF_EXEMPT={'/scim/v2/Users','/metrics','/health'}
+@app.middleware('http')
+async def security_middleware(request,call_next):
+    raw_session=request.cookies.get('peawork_session');payload=untoken(raw_session) if raw_session else None
+    session_id=payload.get('j') if payload else f"anon:{request.cookies.get('peawork_tenant','local')}"
+    existing=request.cookies.get('peawork_csrf')
+    request.state.csrf=existing if existing and verify_csrf(existing,session_id) else csrf_token(session_id)
+    if request.method not in SAFE_METHODS and request.url.path not in CSRF_EXEMPT:
+        submitted=request.headers.get('x-csrf-token')
+        if not submitted:
+            try:submitted=(await request.form()).get('_csrf')
+            except Exception:submitted=None
+        if not submitted or not verify_csrf(submitted,session_id):
+            return JSONResponse({'error':'CSRF validation failed'},status_code=403)
+    response=await call_next(request)
+    if not any(b'peawork_csrf=' in value for key,value in response.raw_headers if key.lower()==b'set-cookie'):
+        response.set_cookie('peawork_csrf',request.state.csrf,httponly=False,samesite='strict',secure=os.getenv('PEAWORK_ENV','local').startswith('cloud'),max_age=7200)
+    response.headers['X-Content-Type-Options']='nosniff';response.headers['X-Frame-Options']='DENY';response.headers['Referrer-Policy']='strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
+    response.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    if os.getenv('PEAWORK_ENV','local').startswith('cloud'):response.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
+    return response
 @app.middleware('http')
 async def tenant_context_middleware(request,call_next):
     slug=request.cookies.get('peawork_tenant') or request.headers.get('x-peawork-tenant')
@@ -42,9 +66,28 @@ def enforce_employee_limit():
     limit=tenant_employee_limit()
     if limit is not None and q("SELECT COUNT(*) n FROM employees WHERE status='Active'",one=True)['n']>=limit:
         raise HTTPException(403,'Tenant employee subscription limit reached')
+def record_security_event(event_type,severity='Medium',actor='',ip='',details='',tenant_id=None):
+    with control_conn() as c:c.execute('INSERT INTO security_events(tenant_id,severity,event_type,actor,ip,details) VALUES(?,?,?,?,?,?)',(tenant_id,severity,event_type,actor,ip,details))
+def session_active(payload):
+    if not payload or not payload.get('j'):return False
+    with control_conn() as c:
+        row=c.execute('SELECT id FROM session_registry WHERE jti=? AND tenant_slug=? AND user_id=? AND revoked_at IS NULL AND expires_at>?',(payload['j'],payload.get('t','local'),payload['u'],int(time.time()))).fetchone()
+        return bool(row)
+def register_session(payload,ip='',user_agent=''):
+    with control_conn() as c:c.execute('INSERT INTO session_registry(tenant_slug,user_id,jti,expires_at,ip,user_agent) VALUES(?,?,?,?,?,?)',(payload.get('t','local'),payload['u'],payload['j'],payload['e'],ip,user_agent[:250]))
+def revoke_session(payload):
+    if payload and payload.get('j'):
+        with control_conn() as c:c.execute('UPDATE session_registry SET revoked_at=CURRENT_TIMESTAMP WHERE jti=?',(payload['j'],))
+def login_throttled(username,ip,window=900,max_failures=5):
+    cutoff=int(time.time())-window
+    with control_conn() as c:
+        failures=c.execute('SELECT COUNT(*) n FROM login_attempts WHERE tenant_slug=? AND username=? AND ip=? AND success=0 AND attempted_at>=?',(current_tenant(),username,ip,cutoff)).fetchone()['n']
+        return failures>=max_failures
+def record_login_attempt(username,ip,success):
+    with control_conn() as c:c.execute('INSERT INTO login_attempts(tenant_slug,username,ip,success,attempted_at) VALUES(?,?,?,?,?)',(current_tenant(),username,ip,int(bool(success)),int(time.time())))
 def me(request):
     t=request.cookies.get('peawork_session'); x=untoken(t) if t else None
-    if not x or x.get('t','local')!=current_tenant(): return None
+    if not x or x.get('t','local')!=current_tenant() or not session_active(x): return None
     return q('SELECT id,username,role,employee_id FROM users WHERE id=? AND active=1',(x['u'],),True)    
 def require(request:Request,roles=None):    
     u=me(request)    
@@ -53,14 +96,18 @@ def require(request:Request,roles=None):
     return u    
 def page(request,name,**ctx):
     u=me(request); notes=q('SELECT * FROM notifications WHERE user_id=? AND read_at IS NULL ORDER BY id DESC LIMIT 5',(u['id'],)) if u else []
-    return templates.TemplateResponse(request,name,{'user':u,'notifications':notes,'today':date.today().isoformat(),'tenant':getattr(request.state,'tenant',{'slug':current_tenant(),'name':'Local'}),**ctx})
+    locale=request.cookies.get('peawork_locale','en')
+    return templates.TemplateResponse(request,name,{'user':u,'notifications':notes,'today':date.today().isoformat(),'tenant':getattr(request.state,'tenant',{'slug':current_tenant(),'name':'Local'}),'csrf_token':request.state.csrf,'locale':locale,'tr':translate(locale),**ctx})
 @app.on_event('startup')
 def startup():
-    init_control_db()
-    init_db()    
-    if not q('SELECT id FROM users LIMIT 1',one=True): seed()    
-def seed():    
-    admin=execq('INSERT INTO users(username,password_hash,role) VALUES(?,?,?)',('admin',hash_password('ChangeMe123!'),'admin'))    
+    environment=os.getenv('PEAWORK_ENV','local')
+    if environment.startswith(('cloud','production')) and os.getenv('PEAWORK_SECRET','dev-only-change-me')=='dev-only-change-me':raise RuntimeError('PEAWORK_SECRET must be replaced before cloud or production startup')
+    init_control_db();init_db()
+    if not q('SELECT id FROM users LIMIT 1',one=True):seed()
+def seed():
+    bootstrap_password=os.getenv('PEAWORK_BOOTSTRAP_ADMIN_PASSWORD','ChangeMe123!')
+    if os.getenv('PEAWORK_ENV','local').startswith(('cloud','production')) and bootstrap_password=='ChangeMe123!':raise RuntimeError('Set PEAWORK_BOOTSTRAP_ADMIN_PASSWORD before cloud or production bootstrap')
+    admin=execq('INSERT INTO users(username,password_hash,role) VALUES(?,?,?)',('admin',hash_password(bootstrap_password),'admin'))    
     hr=execq('INSERT INTO departments(name,code) VALUES(?,?)',('People & Culture','HR'))    
     eng=execq('INSERT INTO departments(name,code) VALUES(?,?)',('Engineering','ENG'))    
     p1=execq('INSERT INTO positions(title,code,department_id,grade) VALUES(?,?,?,?)',('HR Manager','HR-MGR',hr,'M2'))    
@@ -104,28 +151,34 @@ def seed():
         ('OTHERDED','Other Deduction','Deduction','Input',0,60),
     ]:
         execq('INSERT INTO pay_components(code,name,component_type,calculation_type,taxable,display_order) VALUES(?,?,?,?,?,?)',(code,name,ctype,calc,taxable,order))
-    audit('system','SEED','database','','Demo organization initialized through v0.6 cloud beta')    
+    audit('system','SEED','database','','Demo organization initialized through v1.0 production hardening candidate')    
 @app.exception_handler(401)    
 async def unauthorized(request,exc): return RedirectResponse('/login?error=Please+sign+in',303)    
 @app.exception_handler(403)    
 async def forbidden(request,exc): return page(request,'error.html',code=403,message='You do not have access to this action.')    
-@app.get('/health')    
-def health(): return {'status':'ok','version':'0.6.0','deployment':os.getenv('PEAWORK_ENV','local'),'tenant':current_tenant(),'database':'postgresql' if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql') else 'sqlite','storage':os.getenv('PEAWORK_STORAGE_BACKEND','configured')}    
+@app.get('/health')
+def health(): return {'status':'ok','version':'1.0.0','deployment':os.getenv('PEAWORK_ENV','local'),'tenant':current_tenant(),'database':'postgresql' if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql') else 'sqlite','storage':os.getenv('PEAWORK_STORAGE_BACKEND','configured')}
 @app.get('/login',response_class=HTMLResponse)    
 def login_page(request:Request,error:str=''): return page(request,'login.html',error=error)    
-@app.post('/login')    
-def login(request:Request,username:str=Form(...),password:str=Form(...)):    
-    u=q('SELECT * FROM users WHERE username=? AND active=1',(username,),True)    
-    if not u or not verify_password(password,u['password_hash']):    
-        audit(username,'LOGIN_FAILED','session','','',request.client.host); return RedirectResponse('/login?error=Invalid+credentials',303)    
-    secure_cookie=os.getenv('PEAWORK_ENV','local').startswith('cloud')
-    r=RedirectResponse('/',303); r.set_cookie('peawork_session',token(u['id'],u['role'],current_tenant()),httponly=True,samesite='lax',secure=secure_cookie,max_age=28800)    
-    audit(username,'LOGIN','session',u['id'],'',request.client.host); return r    
-@app.get('/logout')    
-def logout(request:Request):    
-    u=me(request)    
-    if u:audit(u['username'],'LOGOUT','session',u['id'])    
-    r=RedirectResponse('/login',303);r.delete_cookie('peawork_session');return r    
+@app.post('/login')
+def login(request:Request,username:str=Form(...),password:str=Form(...)):
+    ip=request.client.host
+    if login_throttled(username,ip):
+        record_security_event('LOGIN_THROTTLED','High',username,ip,'Too many failed login attempts')
+        return RedirectResponse('/login?error=Too+many+attempts.+Try+later',303)
+    u=q('SELECT * FROM users WHERE username=? AND active=1',(username,),True)
+    if not u or not verify_password(password,u['password_hash']):
+        record_login_attempt(username,ip,False);audit(username,'LOGIN_FAILED','session','','',ip);return RedirectResponse('/login?error=Invalid+credentials',303)
+    if not u['password_hash'].startswith('pbkdf2_sha256$'):execq('UPDATE users SET password_hash=? WHERE id=?',(hash_password(password),u['id']))
+    record_login_attempt(username,ip,True);secure_cookie=os.getenv('PEAWORK_ENV','local').startswith('cloud');jti=secrets.token_urlsafe(24);signed=token(u['id'],u['role'],current_tenant(),jti=jti);payload=untoken(signed)
+    register_session(payload,ip,request.headers.get('user-agent',''))
+    r=RedirectResponse('/',303);r.set_cookie('peawork_session',signed,httponly=True,samesite='strict',secure=secure_cookie,max_age=28800);r.set_cookie('peawork_csrf',csrf_token(jti),httponly=False,samesite='strict',secure=secure_cookie,max_age=7200)
+    audit(username,'LOGIN','session',u['id'],'',ip);return r
+@app.post('/logout')
+def logout(request:Request):
+    raw=request.cookies.get('peawork_session');payload=untoken(raw) if raw else None;u=me(request);revoke_session(payload)
+    if u:audit(u['username'],'LOGOUT','session',u['id'])
+    r=RedirectResponse('/login',303);r.delete_cookie('peawork_session');r.delete_cookie('peawork_csrf');return r    
 @app.get('/',response_class=HTMLResponse)    
 def dashboard(request:Request):    
     u=require(request)    
@@ -177,7 +230,7 @@ def leave_decision(lid:int,request:Request,decision:str=Form(...),comment:str=Fo
 def documents(request:Request): require(request);return page(request,'documents.html',documents=q("SELECT x.*,e.employee_no,e.first_name||' '||e.last_name employee FROM documents x LEFT JOIN employees e ON e.id=x.employee_id ORDER BY x.id DESC"),employees=q("SELECT id,employee_no||' - '||first_name||' '||last_name name FROM employees ORDER BY first_name"))    
 @app.post('/documents/upload')    
 def upload_document(request:Request,employee_id:int|None=Form(None),category:str=Form(...),title:str=Form(...),expires_on:str=Form(''),file:UploadFile=File(...)):    
-    u=require(request,['admin','hr']); storage_path=store_upload(file.file,file.filename,'employee-documents')
+    u=require(request,['admin','hr']); storage_path,_=store_upload(file.file,file.filename,'employee-documents',file.content_type)
     i=execq('INSERT INTO documents(employee_id,category,title,filename,storage_path,expires_on) VALUES(?,?,?,?,?,?)',(employee_id,category,title,file.filename,storage_path,expires_on or None));audit(u['username'],'UPLOAD','document',i,file.filename);return RedirectResponse('/documents',303)    
 @app.get('/reports',response_class=HTMLResponse)    
 def reports(request:Request):    
@@ -257,7 +310,7 @@ def candidate_create(request:Request, first_name:str=Form(...), last_name:str=Fo
     filename=path=None  
     if resume and resume.filename:  
         filename=resume.filename  
-        path=store_upload(resume.file,filename,'candidate-resumes')  
+        path,_=store_upload(resume.file,filename,'candidate-resumes',resume.content_type)  
     candidate_no=next_number('candidates','CAN-')  
     cid=execq("""INSERT INTO candidates(candidate_no,first_name,last_name,email,phone,current_company,experience_years,source,resume_filename,resume_path)  
       VALUES(?,?,?,?,?,?,?,?,?,?)""",(candidate_no,first_name,last_name,email.lower(),phone,current_company,max(0,experience_years),source,filename,path))  
@@ -1447,3 +1500,120 @@ def api_cloud_checks(request:Request): require_platform_admin(request);return cl
 @app.get('/cloud/return-control')
 def cloud_return_control():
     r=RedirectResponse('/login',303);r.delete_cookie('peawork_tenant');r.delete_cookie('peawork_session');return r
+
+# -------------------------- v1.0 Production readiness -----------------------
+def active_tenant_record():return resolve_tenant(slug=current_tenant())
+def readiness_context():
+    with control_conn() as c:
+        evidence=[dict(x) for x in c.execute('SELECT * FROM readiness_evidence ORDER BY category,control_code').fetchall()]
+        return {'evidence':evidence,'release_ready':bool(evidence) and all(x['status']=='Verified' for x in evidence),'security_events':[dict(x) for x in c.execute('SELECT s.*,t.name tenant FROM security_events s LEFT JOIN tenants t ON t.id=s.tenant_id ORDER BY s.id DESC LIMIT 100').fetchall()],'dr_exercises':[dict(x) for x in c.execute('SELECT d.*,t.name tenant FROM dr_exercises d LEFT JOIN tenants t ON t.id=d.tenant_id ORDER BY d.exercise_date DESC,d.id DESC').fetchall()],'load_tests':[dict(x) for x in c.execute('SELECT l.*,t.name tenant FROM load_test_runs l LEFT JOIN tenants t ON t.id=l.tenant_id ORDER BY l.id DESC').fetchall()],'accessibility_findings':[dict(x) for x in c.execute('SELECT * FROM accessibility_findings ORDER BY CASE severity WHEN \'Critical\' THEN 1 WHEN \'High\' THEN 2 WHEN \'Medium\' THEN 3 ELSE 4 END,id DESC').fetchall()]}
+def privacy_context(tenant_id):
+    with control_conn() as c:
+        return {'retention_policies':[dict(x) for x in c.execute('SELECT * FROM retention_policies WHERE tenant_id=? ORDER BY data_category',(tenant_id,)).fetchall()],'retention_runs':[dict(x) for x in c.execute('SELECT * FROM retention_runs WHERE tenant_id=? ORDER BY id DESC',(tenant_id,)).fetchall()],'privacy_requests':[dict(x) for x in c.execute('SELECT * FROM privacy_requests WHERE tenant_id=? ORDER BY id DESC',(tenant_id,)).fetchall()],'breaches':[dict(x) for x in c.execute('SELECT * FROM breach_incidents WHERE tenant_id=? ORDER BY id DESC',(tenant_id,)).fetchall()]}
+
+@app.get('/readiness',response_class=HTMLResponse)
+def readiness(request:Request):require_platform_admin(request);return page(request,'readiness.html',**readiness_context())
+
+@app.post('/readiness/evidence/{eid}')
+def readiness_evidence_update(eid:int,request:Request,status:str=Form(...),evidence_reference:str=Form(''),reviewed_by:str=Form(''),notes:str=Form('')):
+    u=require_platform_admin(request)
+    if status not in ['Pending','In Progress','Failed','Verified']:raise HTTPException(400,'Invalid evidence status')
+    if status=='Verified' and (not evidence_reference or not reviewed_by):raise HTTPException(400,'Verified evidence requires a reference and named reviewer')
+    with control_conn() as c:c.execute("UPDATE readiness_evidence SET status=?,evidence_reference=?,reviewed_by=?,reviewed_at=CASE WHEN ?='Verified' THEN CURRENT_TIMESTAMP ELSE NULL END,notes=? WHERE id=?",(status,evidence_reference or None,reviewed_by or None,status,notes,eid))
+    cloud_audit(u['username'],'UPDATE','readiness_evidence',eid,status);return RedirectResponse('/readiness',303)
+
+@app.post('/readiness/dr-exercises')
+def dr_exercise_create(request:Request,tenant_id:int|None=Form(None),exercise_date:str=Form(...),scenario:str=Form(...),target_rpo_minutes:int=Form(...),target_rto_minutes:int=Form(...),actual_rpo_minutes:int|None=Form(None),actual_rto_minutes:int|None=Form(None),restore_verified:int=Form(0),evidence:str=Form(''),status:str=Form('Planned'),approved_by:str=Form('')):
+    u=require_platform_admin(request)
+    if status=='Completed' and (not restore_verified or not evidence or not approved_by):raise HTTPException(400,'Completed DR exercises require verified restore evidence and approver')
+    with control_conn() as c:did=c.execute('INSERT INTO dr_exercises(tenant_id,exercise_date,scenario,target_rpo_minutes,target_rto_minutes,actual_rpo_minutes,actual_rto_minutes,restore_verified,evidence,status,approved_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(tenant_id,exercise_date,scenario,target_rpo_minutes,target_rto_minutes,actual_rpo_minutes,actual_rto_minutes,int(bool(restore_verified)),evidence,status,approved_by or None)).lastrowid
+    cloud_audit(u['username'],'CREATE','dr_exercise',did,status,tenant_id);return RedirectResponse('/readiness',303)
+
+@app.post('/readiness/load-tests')
+def load_test_record(request:Request,tenant_id:int|None=Form(None),scenario:str=Form(...),concurrency:int=Form(...),duration_seconds:int=Form(...),requests_count:int=Form(...),errors:int=Form(...),p50_ms:float|None=Form(None),p95_ms:float|None=Form(None),p99_ms:float|None=Form(None),evidence:str=Form('')):
+    u=require_platform_admin(request);status='Passed' if errors==0 and evidence else 'Review Required'
+    with control_conn() as c:lid=c.execute('INSERT INTO load_test_runs(tenant_id,scenario,concurrency,duration_seconds,requests,errors,p50_ms,p95_ms,p99_ms,status,evidence) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(tenant_id,scenario,concurrency,duration_seconds,requests_count,errors,p50_ms,p95_ms,p99_ms,status,evidence)).lastrowid
+    cloud_audit(u['username'],'CREATE','load_test',lid,status,tenant_id);return RedirectResponse('/readiness',303)
+
+@app.post('/readiness/accessibility')
+def accessibility_finding_create(request:Request,page_name:str=Form(...),standard:str=Form('WCAG 2.2 AA'),finding:str=Form(...),severity:str=Form(...),evidence:str=Form(''),owner_role:str=Form('Product Engineering')):
+    u=require_platform_admin(request)
+    with control_conn() as c:fid=c.execute('INSERT INTO accessibility_findings(page_name,standard,finding,severity,evidence,owner_role) VALUES(?,?,?,?,?,?)',(page_name,standard,finding,severity,evidence,owner_role)).lastrowid
+    cloud_audit(u['username'],'CREATE','accessibility_finding',fid,severity);return RedirectResponse('/readiness',303)
+
+@app.post('/readiness/accessibility/{fid}/resolve')
+def accessibility_finding_resolve(fid:int,request:Request,evidence:str=Form(...)):
+    u=require_platform_admin(request)
+    with control_conn() as c:c.execute("UPDATE accessibility_findings SET status='Resolved',evidence=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?",(evidence,fid))
+    cloud_audit(u['username'],'RESOLVE','accessibility_finding',fid,evidence);return RedirectResponse('/readiness',303)
+
+@app.get('/privacy',response_class=HTMLResponse)
+def privacy_console(request:Request):
+    require(request,['admin','hr']);tenant=active_tenant_record()
+    if not tenant:raise HTTPException(404,'Tenant control record not found')
+    return page(request,'privacy.html',**privacy_context(tenant['id']))
+
+@app.post('/privacy/retention')
+def retention_policy_upsert(request:Request,data_category:str=Form(...),retention_days:int=Form(...),action:str=Form('Delete'),legal_hold:int=Form(0),status:str=Form('Draft'),approved_by:str=Form('')):
+    u=require(request,['admin']);tenant=active_tenant_record()
+    allowed={'Notifications','Login Attempts','Security Events','Documents Metadata','Candidate Data'}
+    if data_category not in allowed:raise HTTPException(400,'Unsupported data category')
+    if status=='Approved' and not approved_by:raise HTTPException(400,'Approved retention policies require an approver')
+    with control_conn() as c:c.execute("""INSERT INTO retention_policies(tenant_id,data_category,retention_days,action,legal_hold,status,approved_by,approved_at) VALUES(?,?,?,?,?,?,?,CASE WHEN ?='Approved' THEN CURRENT_TIMESTAMP ELSE NULL END) ON CONFLICT(tenant_id,data_category) DO UPDATE SET retention_days=excluded.retention_days,action=excluded.action,legal_hold=excluded.legal_hold,status=excluded.status,approved_by=excluded.approved_by,approved_at=excluded.approved_at""",(tenant['id'],data_category,max(1,retention_days),action,int(bool(legal_hold)),status,approved_by or None,status))
+    cloud_audit(u['username'],'UPDATE','retention_policy',data_category,status,tenant['id']);return RedirectResponse('/privacy',303)
+
+@app.post('/privacy/retention/run')
+def retention_run(request:Request,dry_run:int=Form(1)):
+    u=require(request,['admin']);tenant=active_tenant_record();reviewed=acted=0;details=[]
+    with control_conn() as c:run_id=c.execute("INSERT INTO retention_runs(tenant_id,status) VALUES(?,'Running')",(tenant['id'],)).lastrowid;policies=c.execute("SELECT * FROM retention_policies WHERE tenant_id=? AND status='Approved' AND legal_hold=0",(tenant['id'],)).fetchall()
+    for policy in policies:
+        cutoff=(datetime.utcnow()-timedelta(days=policy['retention_days'])).strftime('%Y-%m-%d %H:%M:%S');category=policy['data_category'];count=0
+        if category=='Notifications':count=q('SELECT COUNT(*) n FROM notifications WHERE created_at<?',(cutoff,),True)['n'];reviewed+=count;acted+=0 if dry_run else count;execq('DELETE FROM notifications WHERE created_at<?',(cutoff,)) if not dry_run else None
+        elif category=='Documents Metadata':count=q('SELECT COUNT(*) n FROM documents WHERE created_at<?',(cutoff,),True)['n'];reviewed+=count;acted+=0 if dry_run else count;execq('DELETE FROM documents WHERE created_at<?',(cutoff,)) if not dry_run else None
+        elif category=='Candidate Data':count=q("SELECT COUNT(*) n FROM candidates WHERE created_at<? AND status IN ('Rejected','Withdrawn')",(cutoff,),True)['n'];reviewed+=count;details.append(f'{category}: {count} candidates require anonymization review; automatic deletion disabled')
+        elif category=='Login Attempts':
+            epoch=int((datetime.utcnow()-timedelta(days=policy['retention_days'])).timestamp())
+            with control_conn() as c:count=c.execute('SELECT COUNT(*) n FROM login_attempts WHERE tenant_slug=? AND attempted_at<?',(current_tenant(),epoch)).fetchone()['n'];reviewed+=count;acted+=0 if dry_run else count;c.execute('DELETE FROM login_attempts WHERE tenant_slug=? AND attempted_at<?',(current_tenant(),epoch)) if not dry_run else None
+        elif category=='Security Events':
+            with control_conn() as c:count=c.execute("SELECT COUNT(*) n FROM security_events WHERE tenant_id=? AND created_at<? AND status='Resolved'",(tenant['id'],cutoff)).fetchone()['n'];reviewed+=count;acted+=0 if dry_run else count;c.execute("DELETE FROM security_events WHERE tenant_id=? AND created_at<? AND status='Resolved'",(tenant['id'],cutoff)) if not dry_run else None
+        details.append(f'{category}: reviewed {count}, acted {0 if dry_run else count}')
+    with control_conn() as c:c.execute("UPDATE retention_runs SET status='Completed',records_reviewed=?,records_acted=?,details=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(reviewed,acted,'\n'.join(details),run_id))
+    cloud_audit(u['username'],'RUN','retention',run_id,f'dry_run={bool(dry_run)}; reviewed={reviewed}; acted={acted}',tenant['id']);return RedirectResponse('/privacy',303)
+
+@app.post('/privacy/requests')
+def privacy_request_create(request:Request,request_type:str=Form(...),data_subject:str=Form(...),received_on:str=Form(...),due_on:str=Form('')):
+    u=require(request,['admin','hr']);tenant=active_tenant_record()
+    if request_type not in ['Access','Correction','Erasure','Grievance','Consent Withdrawal']:raise HTTPException(400,'Invalid privacy request type')
+    with control_conn() as c:rid=c.execute('INSERT INTO privacy_requests(tenant_id,request_type,data_subject,received_on,due_on) VALUES(?,?,?,?,?)',(tenant['id'],request_type,data_subject,received_on,due_on or None)).lastrowid
+    cloud_audit(u['username'],'CREATE','privacy_request',rid,request_type,tenant['id']);return RedirectResponse('/privacy',303)
+
+@app.post('/privacy/requests/{rid}/update')
+def privacy_request_update(rid:int,request:Request,identity_status:str=Form(...),status:str=Form(...),decision:str=Form(''),evidence:str=Form('')):
+    u=require(request,['admin','hr']);tenant=active_tenant_record()
+    if status=='Completed' and (identity_status!='Verified' or not evidence):raise HTTPException(400,'Completed requests require verified identity and evidence')
+    with control_conn() as c:c.execute("UPDATE privacy_requests SET identity_status=?,status=?,decision=?,evidence=?,completed_at=CASE WHEN ?='Completed' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND tenant_id=?",(identity_status,status,decision,evidence,status,rid,tenant['id']))
+    cloud_audit(u['username'],'UPDATE','privacy_request',rid,status,tenant['id']);return RedirectResponse('/privacy',303)
+
+@app.post('/privacy/breaches')
+def breach_create(request:Request,severity:str=Form(...),detected_at:str=Form(...),description:str=Form(...),systems_affected:str=Form(''),data_categories:str=Form('')):
+    u=require(request,['admin']);tenant=active_tenant_record()
+    with control_conn() as c:bid=c.execute('INSERT INTO breach_incidents(tenant_id,severity,detected_at,description,systems_affected,data_categories) VALUES(?,?,?,?,?,?)',(tenant['id'],severity,detected_at,description,systems_affected,data_categories)).lastrowid
+    record_security_event('PRIVACY_BREACH',severity,u['username'],request.client.host,description,tenant['id']);cloud_audit(u['username'],'CREATE','breach_incident',bid,severity,tenant['id']);return RedirectResponse('/privacy',303)
+
+@app.post('/privacy/breaches/{bid}/update')
+def breach_update(bid:int,request:Request,containment:str=Form(...),assessment_status:str=Form(...),notification_decision:str=Form(''),status:str=Form(...)):
+    u=require(request,['admin']);tenant=active_tenant_record()
+    if status=='Closed' and (not containment or not notification_decision):raise HTTPException(400,'Closed incidents require containment and notification decision')
+    with control_conn() as c:c.execute("UPDATE breach_incidents SET containment=?,assessment_status=?,notification_decision=?,status=?,closed_at=CASE WHEN ?='Closed' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND tenant_id=?",(containment,assessment_status,notification_decision,status,status,bid,tenant['id']))
+    cloud_audit(u['username'],'UPDATE','breach_incident',bid,status,tenant['id']);return RedirectResponse('/privacy',303)
+
+@app.post('/locale')
+def locale_change(request:Request,locale:str=Form(...)):
+    if locale not in ['en','hi']:raise HTTPException(400,'Unsupported locale')
+    r=RedirectResponse(request.headers.get('referer','/'),303);r.set_cookie('peawork_locale',locale,samesite='lax',max_age=31536000);return r
+
+@app.post('/readiness/security-events/{sid}/resolve')
+def security_event_resolve(sid:int,request:Request,resolution:str=Form(...)):
+    u=require_platform_admin(request)
+    with control_conn() as c:c.execute("UPDATE security_events SET status='Resolved',details=details||? ,resolved_at=CURRENT_TIMESTAMP WHERE id=?",('\nResolution: '+resolution,sid))
+    cloud_audit(u['username'],'RESOLVE','security_event',sid,resolution);return RedirectResponse('/readiness',303)

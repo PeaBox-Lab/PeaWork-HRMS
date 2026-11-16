@@ -11,7 +11,7 @@ Goals/OKRs, performance cycles, check-ins, 360 feedback, skills, competencies, d
 Salary structures, earnings/deductions, attendance inputs, arrears, reimbursements, payroll preview, variance checks, payslips and accounting export. Delivered in v0.5.0 as a validation-gated beta; statutory implementation still requires specialist approval and production golden cases.    
 ## v0.6 Cloud beta, delivered    
 Tenant isolation, PostgreSQL, object storage, subscriptions, custom domains, SSO/SCIM configuration, monitoring, backup/PITR controls and a Local migration assistant. Delivered in v0.6.0 as a cloud beta with documented provider-integration gates.    
-## v1.0 production hardening, 6   8 weeks    
-OWASP ASVS Level 2 verification, penetration test, accessibility, localization, disaster-recovery exercise, load testing to agreed concurrency, data retention and DPDP workflows.    
+## v1.0 production hardening, release candidate delivered    
+Security, accessibility, localization, disaster-recovery, load testing, retention and DPDP control workflows are implemented in v1.0.0. Independent ASVS verification, penetration testing, legal validation, accessibility audit, approved load thresholds and restore sign-off remain evidence gates before production certification.    
 ## Later    
 LMS, compensation planning, benefits, engagement, succession, org modeling, workforce planning, marketplace integrations, mobile/PWA and permission-aware AI assistants.

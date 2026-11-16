@@ -1,0 +1,23 @@
+# PeaWork v1.0 production controls
+
+Draft for qualified security, privacy, accessibility, payroll, legal and operational review.
+
+| Process step | Risk | Control ID | Control description | Type | Frequency | Evidence | Owner role |
+|---|---|---|---|---|---|---|---|
+| Authentication | An attacker gains access through repeated password guessing | SEC-01 | The application counts failed attempts by tenant, username and IP and blocks login after the configured threshold/window | Preventive, automated | Per login | Login-attempt rows and security event | Security Operations |
+| Session use | A stolen or old session remains usable after logout or tenant switch | SEC-02 | Each signed token has a unique registered session ID; every request checks active/unexpired status; logout revokes it and tenant switch clears it | Preventive, automated | Per request | Session registry with issue, expiry and revocation | Identity Platform |
+| State-changing request | A third-party site causes an authenticated user to submit an unauthorized action | SEC-03 | Unsafe HTTP methods require a signed, session-bound CSRF token; SCIM bearer and read-only endpoints are explicitly scoped exceptions | Preventive, automated | Per request | Rejected 403 response and application logs | Application Security |
+| Browser response | Browser behavior exposes content through framing, MIME confusion or excessive permissions | SEC-04 | Security middleware adds CSP, frame denial, content-type, referrer, permissions and cloud HSTS headers | Preventive, automated | Per response | Header test evidence | Application Security |
+| File upload | Malicious or oversized content enters document storage | SEC-05 | Extension, MIME and size allow-lists apply before storage; production can require a clean scanner result and fails closed if scanner is unavailable | Preventive, automated | Per upload | Rejected upload response and scanner record | Security Operations |
+| Credential storage | A password database compromise exposes reusable clear or weak hashes | SEC-06 | New passwords use versioned PBKDF2 parameters; successful login upgrades legacy hashes | Preventive, automated | Per create/login | Stored hash prefix and migration audit | Identity Platform |
+| Data retention | Records persist beyond approved need or are deleted during legal hold | PRIV-01 | Only approved policies execute; legal-hold policies are excluded; every run records reviewed and acted counts; candidate deletion remains manual review | Preventive/detective, IT-dependent | Scheduled | Retention policy, run detail and cloud audit | Privacy Officer |
+| Data-subject request | A request is completed for the wrong person or without proof | PRIV-02 | Completion requires identity status Verified and evidence/reference | Preventive, IT-dependent | Per request | Request record and completion evidence | Privacy Officer |
+| Breach response | A breach closes without containment or notification decision | PRIV-03 | Incident closure requires containment evidence and notification rationale; opening an incident creates a security event | Preventive/detective | Per incident | Incident and security-event records | Incident Commander |
+| Release approval | The system is labeled production-ready without independent evidence | GOV-01 | Eight readiness gates remain Pending until reviewer name and evidence reference are recorded; the UI reports not certified until all gates are Verified | Preventive, IT-dependent | Per release | Readiness evidence table | Release Manager |
+| Disaster recovery | Backups exist but cannot be restored within target | RES-01 | A completed exercise requires restore verification, actual RPO/RTO, evidence and approver | Detective | Per exercise | DR exercise record and restore artefact | Business Continuity Owner |
+| Performance | Capacity assumptions are unsupported | PERF-01 | Load-test results record concurrency, duration, requests, errors and latency percentiles with evidence; approved target is set by management | Detective | Per release | Load-test JSON/report and readiness record | Performance Engineering |
+| Accessibility | Critical barriers remain unresolved | A11Y-01 | Findings are logged by page/standard/severity and remain open until resolution evidence is attached; independent audit is a separate release gate | Detective | Per review | Finding and audit report | Accessibility Lead |
+
+## Exception path
+
+Any control failure creates or retains an open event/finding. Critical and high security events block the readiness command. Failed or missing independent evidence keeps the release gate Pending or Failed. Product management cannot convert absent evidence into a Verified state without the named reviewer and evidence reference.

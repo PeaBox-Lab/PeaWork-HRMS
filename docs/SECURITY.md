@@ -30,3 +30,17 @@ This repository is a functional MVP, not a compliance certification.
 - Object-storage keys include the tenant prefix and request server-side encryption.
 
 These controls do not replace production threat modeling, secret-vault integration, network isolation, row/schema authorization testing, federation signature validation, rate limiting, centralized audit or penetration testing.
+
+
+## v1.0 implemented hardening
+- Session-bound CSRF validation for state-changing browser requests.
+- Versioned password hashing with legacy upgrade.
+- Server-side session registration, expiry and revocation.
+- Login throttling and high-severity event creation.
+- CSP, anti-framing, MIME, referrer, permissions and cloud HSTS headers.
+- Strict cloud cookies and tenant-bound session IDs.
+- Upload type, MIME and size allow-lists plus fail-closed malware scan option.
+- Startup refusal for default production secrets/bootstrap password.
+- Evidenced privacy, retention, breach, accessibility, resilience and release gates.
+
+Independent ASVS review, external penetration testing, organization-approved SAST/dependency scanning, managed secrets, centralized immutable audit, MFA/federation certification and production network controls remain required before certification.
