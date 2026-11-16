@@ -28,3 +28,7 @@ Cloud beta separates global control metadata from tenant application data. The c
 
 ## v1.0 production control layer
 Production hardening adds a request security middleware, server-side session registry, login-attempt and security-event evidence, privacy/retention workflows, breach records, readiness evidence, accessibility findings, DR exercises and load-test results. Control-plane records remain separate from tenant HR data. Release approval is evidence-based: the application can enforce technical controls, but independent assessments and qualified review remain explicit gates rather than self-attested flags.
+
+
+## v1.1 Global Core HR
+Global Core HR adds effective-dated organizational, job, assignment and salary records without replacing the original employee master used by earlier modules. Controlled transfers close the source assignment and create a new target assignment in one transaction. Lifecycle events link each material employment change to its source transaction. Journey definitions and relative-date task templates provide a common engine for onboarding and other employee transitions; offboarding uses a dedicated approval and clearance workflow because separation has irreversible access, asset, payroll and recordkeeping consequences.

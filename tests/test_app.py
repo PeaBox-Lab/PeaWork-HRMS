@@ -316,3 +316,57 @@ def test_password_hash_upgrade_and_locale():
     with authenticated_client() as c:
         assert c.post('/locale',data={'locale':'hi'},follow_redirects=False).status_code==303
         assert c.cookies.get('peawork_locale')=='hi'
+
+
+def test_global_core_hr_transfer_salary_and_skill_gap():
+    with authenticated_client() as c:
+        assert c.post('/core-hr/legal-entities',data={'code':'PW-US','name':'PeaWork USA','country_code':'US','registration_no':'REG-US','tax_id_masked':'***1234','currency_code':'USD','timezone':'America/New_York'},follow_redirects=False).status_code==303
+        entity=q("SELECT id FROM legal_entities WHERE code='PW-US'",one=True)['id']
+        assert c.post('/core-hr/locations',data={'code':'NYC','name':'New York Office','legal_entity_id':entity,'country_code':'US','state_region':'NY','city':'New York','timezone':'America/New_York','address':'Test'},follow_redirects=False).status_code==303
+        location=q("SELECT id FROM work_locations WHERE code='NYC'",one=True)['id']
+        assert c.post('/core-hr/cost-centers',data={'code':'CC-US-ENG','name':'US Engineering','legal_entity_id':entity},follow_redirects=False).status_code==303
+        cc=q("SELECT id FROM cost_centers WHERE code='CC-US-ENG'",one=True)['id']
+        assert c.post('/core-hr/projects',data={'code':'P-US-1','name':'Global Platform','legal_entity_id':entity,'cost_center_id':cc,'manager_employee_id':'1','start_date':'2027-01-01','client_name':'Internal'},follow_redirects=False).status_code==303
+        project=q("SELECT id FROM projects WHERE code='P-US-1'",one=True)['id']
+        assert c.post('/core-hr/job-families',data={'code':'ENG','name':'Engineering','description':'Engineering jobs'},follow_redirects=False).status_code==303
+        family=q("SELECT id FROM job_families WHERE code='ENG'",one=True)['id']
+        assert c.post('/core-hr/job-profiles',data={'code':'ENG-SENIOR','title':'Senior Engineer','family_id':family,'level_code':'P3','grade':'G7','description':'Senior role','responsibilities':'Delivery'},follow_redirects=False).status_code==303
+        job=q("SELECT id FROM job_profiles WHERE code='ENG-SENIOR'",one=True)['id'];skill=q("SELECT id FROM skills WHERE name='Python'",one=True)['id']
+        assert c.post(f'/core-hr/job-profiles/{job}/skills',data={'skill_id':skill,'required_proficiency':'5','critical':'1'},follow_redirects=False).status_code==303
+        source=q("SELECT id FROM employee_assignments WHERE employee_id=2 AND assignment_status='Active'",one=True)['id']
+        assert c.post('/core-hr/transfers',data={'employee_id':'2','effective_date':'2027-04-01','target_legal_entity_id':entity,'target_location_id':location,'target_cost_center_id':cc,'target_project_id':project,'target_job_profile_id':job,'target_manager_id':'1','reason':'Global mobility'},follow_redirects=False).status_code==303
+        transfer=q('SELECT MAX(id) id FROM employee_transfers',one=True)['id'];assert c.post(f'/core-hr/transfers/{transfer}/decision',data={'decision':'approve'},follow_redirects=False).status_code==303
+        old=q('SELECT * FROM employee_assignments WHERE id=?',(source,),True);new=q("SELECT * FROM employee_assignments WHERE employee_id=2 AND effective_from='2027-04-01'",one=True)
+        assert old['effective_to']=='2027-03-31' and old['assignment_status']=='Transferred' and new['legal_entity_id']==entity and new['job_profile_id']==job
+        assert c.post('/core-hr/salary',data={'employee_id':'2','currency_code':'USD','annual_base':'120000','annual_variable_target':'12000','effective_from':'2027-04-01','reason':'US transfer'},follow_redirects=False).status_code==303
+        salary=q('SELECT MAX(id) id FROM employee_salary_history',one=True)['id'];assert c.post(f'/core-hr/salary/{salary}/decision',data={'decision':'approve'},follow_redirects=False).status_code==303
+        assert q('SELECT approval_status FROM employee_salary_history WHERE id=?',(salary,),True)['approval_status']=='Approved'
+        assert any(x['skill']=='Python' and x['employee_id']==2 for x in c.get('/core-hr').context['skill_gaps'])
+
+
+def test_journey_and_offboarding_controls():
+    with authenticated_client() as c:
+        journey=q("SELECT id FROM journey_definitions WHERE journey_type='Onboarding' ORDER BY id LIMIT 1",one=True)['id']
+        assert c.post('/lifecycle/journeys/start',data={'employee_id':'2','journey_id':journey,'start_date':'2027-01-15','target_date':'2027-04-15','source_entity_type':'Manual'},follow_redirects=False).status_code==303
+        ej=q('SELECT MAX(id) id FROM employee_journeys',one=True)['id'];tasks=q('SELECT * FROM employee_journey_tasks WHERE employee_journey_id=?',(ej,));assert tasks
+        required=next(x for x in tasks if q('SELECT completion_evidence_required v FROM journey_task_templates WHERE id=?',(x['template_id'],),True)['v'])
+        assert c.post(f"/lifecycle/journey-tasks/{required['id']}/status",data={'status':'Completed','evidence':'','notes':'Done'},follow_redirects=False).status_code==400
+        for task in tasks:
+            template=q('SELECT completion_evidence_required v FROM journey_task_templates WHERE id=?',(task['template_id'],),True)
+            assert c.post(f"/lifecycle/journey-tasks/{task['id']}/status",data={'status':'Completed','evidence':'proof' if template['v'] else '','notes':'Done'},follow_redirects=False).status_code==303
+        assert q('SELECT status FROM employee_journeys WHERE id=?',(ej,),True)['status']=='Completed'
+        assert c.post('/lifecycle/offboarding',data={'employee_id':'2','separation_type':'Resignation','notice_date':'2027-05-01','last_working_date':'2027-05-31','reason':'Personal','eligible_for_rehire':'Yes'},follow_redirects=False).status_code==303
+        case=q('SELECT MAX(id) id FROM offboarding_cases',one=True)['id'];assert c.post(f'/lifecycle/offboarding/{case}/decision',data={'decision':'approve'},follow_redirects=False).status_code==303
+        assert c.post(f'/lifecycle/offboarding/{case}/complete',follow_redirects=False).status_code==400
+        for task in q('SELECT * FROM offboarding_tasks WHERE case_id=?',(case,)):
+            tmpl=q('SELECT evidence_required v FROM offboarding_task_templates WHERE id=?',(task['template_id'],),True)
+            assert c.post(f"/lifecycle/offboarding-tasks/{task['id']}/status",data={'status':'Completed','evidence':'clearance' if tmpl['v'] else '','notes':'Done'},follow_redirects=False).status_code==303
+        assert c.post(f'/lifecycle/offboarding/{case}/complete',follow_redirects=False).status_code==303
+        assert q('SELECT status FROM employees WHERE id=2',one=True)['status']=='Inactive'
+        assert q("SELECT COUNT(*) n FROM employee_events e JOIN lifecycle_event_types t ON t.id=e.event_type_id WHERE e.employee_id=2 AND t.code='SEPARATION'",one=True)['n']==1
+
+
+def test_core_hr_apis_require_authentication():
+    with client() as c:
+        for path in ['/api/v1/core-hr/assignments','/api/v1/core-hr/events','/api/v1/core-hr/journeys','/api/v1/core-hr/offboarding']:
+            assert c.get(path,follow_redirects=False).status_code in (303,307)

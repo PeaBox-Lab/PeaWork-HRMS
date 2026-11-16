@@ -115,3 +115,21 @@ Payroll calculations, statutory filings, biometric devices, recruiting, performa
 15. Production readiness remains false until all required external/internal evidence gates are Verified.
 16. Open high/critical security events block the readiness command.
 17. Existing v0.6 tenant, PostgreSQL, storage and migration behavior remains available on port 8090.
+
+## v1.1 acceptance criteria
+1. HR can maintain global legal entities, locations, cost centers and projects.
+2. HR can maintain job families, profiles, levels, grades and job skill requirements.
+3. Each employee can have a unique global employee profile and identifier.
+4. Effective-dated assignments preserve entity, location, organization, project, job and manager history.
+5. Assignment creation rejects overlapping periods for the same assignment number.
+6. Transfers require approval, close the old assignment and create a linked new assignment.
+7. Transfer approval synchronizes current employee master fields and records an event.
+8. Salary changes require approval and preserve non-overlapping salary history.
+9. Job requirements compare to employee skills and identify proficiency gaps.
+10. Journey definitions generate relative-date tasks with role-based ownership.
+11. Evidence-required journey tasks cannot close without support.
+12. Offboarding approval generates access, asset, handover, payroll and exit tasks.
+13. Separation completion is blocked while required offboarding tasks remain open.
+14. Completed separation closes the assignment, inactivates the employee/user and records a lifecycle event.
+15. Core-HR APIs require a valid authorized session.
+16. Existing v1.0 tenant, security, privacy and readiness controls remain intact.

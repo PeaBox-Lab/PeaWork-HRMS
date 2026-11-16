@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 - Global Core HR
+- Added global legal entities, locations, cost centers and projects.
+- Added job families, profiles, grades, levels and skill requirements.
+- Added global employee profiles and identifiers.
+- Added effective-dated employee assignments and assignment history.
+- Added approval-gated global transfers with inherited target assignments.
+- Added approval-gated effective-dated salary history.
+- Added job-to-employee skill-gap reporting.
+- Added reusable onboarding/transition journey definitions and task evidence.
+- Added employee lifecycle events linked to source transactions.
+- Added approval-gated offboarding, access/asset/handover/payroll tasks and separation completion controls.
+- Added APIs, tests, acceptance criteria and Global Core HR operating documentation.
+
 ## 1.0.0 - Production hardening candidate
 - Added strict CSRF protection and hardened browser response headers.
 - Added versioned password hashing, legacy upgrade and login throttling.

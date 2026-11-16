@@ -385,6 +385,135 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_payroll_inputs_period ON payroll_inputs(period_id,employee_id);
     CREATE INDEX IF NOT EXISTS idx_payroll_run_employee ON payroll_run_employees(run_id,employee_id);
     CREATE INDEX IF NOT EXISTS idx_payroll_lines_employee ON payroll_run_lines(run_employee_id,component_type);
+
+    CREATE TABLE IF NOT EXISTS legal_entities(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      country_code TEXT NOT NULL, registration_no TEXT, tax_id_masked TEXT,
+      currency_code TEXT DEFAULT 'INR', timezone TEXT DEFAULT 'Asia/Kolkata',
+      active INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS work_locations(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      legal_entity_id INTEGER, country_code TEXT NOT NULL, state_region TEXT,
+      city TEXT, timezone TEXT, address TEXT, active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS cost_centers(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      legal_entity_id INTEGER, parent_id INTEGER, owner_employee_id INTEGER,
+      active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS projects(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      legal_entity_id INTEGER, cost_center_id INTEGER, manager_employee_id INTEGER,
+      start_date TEXT, end_date TEXT, status TEXT DEFAULT 'Active', client_name TEXT
+    );
+    CREATE TABLE IF NOT EXISTS job_families(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      description TEXT, active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS job_profiles(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
+      family_id INTEGER, level_code TEXT, grade TEXT, description TEXT,
+      responsibilities TEXT, active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS job_skill_requirements(
+      id INTEGER PRIMARY KEY, job_profile_id INTEGER NOT NULL, skill_id INTEGER NOT NULL,
+      required_proficiency INTEGER NOT NULL DEFAULT 1, critical INTEGER DEFAULT 0,
+      UNIQUE(job_profile_id,skill_id)
+    );
+    CREATE TABLE IF NOT EXISTS employee_global_profiles(
+      id INTEGER PRIMARY KEY, employee_id INTEGER UNIQUE NOT NULL,
+      global_employee_id TEXT UNIQUE NOT NULL, preferred_name TEXT,
+      personal_email TEXT, nationality_country_code TEXT, home_country_code TEXT,
+      primary_language TEXT DEFAULT 'en', emergency_contact_name TEXT,
+      emergency_contact_phone TEXT, data_residency_region TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS employee_assignments(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, assignment_no TEXT NOT NULL,
+      legal_entity_id INTEGER NOT NULL, location_id INTEGER, department_id INTEGER,
+      cost_center_id INTEGER, project_id INTEGER, job_profile_id INTEGER,
+      position_id INTEGER, manager_id INTEGER, employment_type TEXT DEFAULT 'Full-time',
+      worker_type TEXT DEFAULT 'Employee', assignment_status TEXT DEFAULT 'Active',
+      effective_from TEXT NOT NULL, effective_to TEXT, primary_assignment INTEGER DEFAULT 1,
+      reason TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(employee_id,assignment_no,effective_from)
+    );
+    CREATE TABLE IF NOT EXISTS employee_transfers(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, source_assignment_id INTEGER NOT NULL,
+      effective_date TEXT NOT NULL, target_legal_entity_id INTEGER,
+      target_location_id INTEGER, target_department_id INTEGER,
+      target_cost_center_id INTEGER, target_project_id INTEGER,
+      target_job_profile_id INTEGER, target_position_id INTEGER,
+      target_manager_id INTEGER, reason TEXT, status TEXT DEFAULT 'Draft',
+      requested_by INTEGER, approved_by INTEGER, requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      approved_at TEXT, completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS employee_salary_history(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, assignment_id INTEGER,
+      currency_code TEXT NOT NULL, annual_base REAL NOT NULL, annual_variable_target REAL DEFAULT 0,
+      effective_from TEXT NOT NULL, effective_to TEXT, reason TEXT,
+      approval_status TEXT DEFAULT 'Draft', requested_by INTEGER, approved_by INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, approved_at TEXT,
+      UNIQUE(employee_id,effective_from)
+    );
+    CREATE TABLE IF NOT EXISTS lifecycle_event_types(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      category TEXT NOT NULL, active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS employee_events(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, event_type_id INTEGER NOT NULL,
+      effective_date TEXT NOT NULL, event_status TEXT DEFAULT 'Completed',
+      assignment_id INTEGER, details_json TEXT, source_entity_type TEXT,
+      source_entity_id TEXT, created_by INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS journey_definitions(
+      id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      journey_type TEXT NOT NULL, legal_entity_id INTEGER, country_code TEXT,
+      employment_type TEXT DEFAULT 'Any', active INTEGER DEFAULT 1,
+      version INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS journey_task_templates(
+      id INTEGER PRIMARY KEY, journey_id INTEGER NOT NULL, title TEXT NOT NULL,
+      category TEXT DEFAULT 'General', owner_role TEXT DEFAULT 'hr',
+      due_offset_days INTEGER DEFAULT 0, required INTEGER DEFAULT 1,
+      completion_evidence_required INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS employee_journeys(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, journey_id INTEGER NOT NULL,
+      journey_type TEXT NOT NULL, start_date TEXT NOT NULL, target_date TEXT,
+      status TEXT DEFAULT 'Planned', source_entity_type TEXT, source_entity_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS employee_journey_tasks(
+      id INTEGER PRIMARY KEY, employee_journey_id INTEGER NOT NULL, template_id INTEGER,
+      title TEXT NOT NULL, category TEXT DEFAULT 'General', owner_user_id INTEGER,
+      due_date TEXT, status TEXT DEFAULT 'Open', evidence TEXT, notes TEXT,
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS offboarding_cases(
+      id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, assignment_id INTEGER,
+      separation_type TEXT NOT NULL, notice_date TEXT, last_working_date TEXT NOT NULL,
+      reason TEXT, regretted INTEGER DEFAULT 0, eligible_for_rehire TEXT DEFAULT 'Review',
+      status TEXT DEFAULT 'Draft', requested_by INTEGER, approved_by INTEGER,
+      requested_at TEXT DEFAULT CURRENT_TIMESTAMP, approved_at TEXT, completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS offboarding_task_templates(
+      id INTEGER PRIMARY KEY, title TEXT NOT NULL, category TEXT NOT NULL,
+      owner_role TEXT DEFAULT 'hr', due_offset_days INTEGER DEFAULT 0,
+      required INTEGER DEFAULT 1, evidence_required INTEGER DEFAULT 0, active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS offboarding_tasks(
+      id INTEGER PRIMARY KEY, case_id INTEGER NOT NULL, template_id INTEGER,
+      title TEXT NOT NULL, category TEXT NOT NULL, owner_user_id INTEGER,
+      due_date TEXT, status TEXT DEFAULT 'Open', evidence TEXT, notes TEXT,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_assignments_employee_date ON employee_assignments(employee_id,effective_from,effective_to);
+    CREATE INDEX IF NOT EXISTS idx_transfers_status_date ON employee_transfers(status,effective_date);
+    CREATE INDEX IF NOT EXISTS idx_events_employee_date ON employee_events(employee_id,effective_date);
+    CREATE INDEX IF NOT EXISTS idx_journey_tasks_due ON employee_journey_tasks(due_date,status);
+    CREATE INDEX IF NOT EXISTS idx_offboarding_tasks_due ON offboarding_tasks(due_date,status);
     """
     if os.getenv('PEAWORK_DATABASE_URL','').startswith('postgresql'):
         schema=re.sub(r'INTEGER PRIMARY KEY','BIGSERIAL PRIMARY KEY',schema)
