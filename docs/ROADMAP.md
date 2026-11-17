@@ -189,6 +189,8 @@ We are not bolting a hardened product onto the prototype. We are doing a **contr
 
 ## R2 — Time & attendance (v2.1)
 
+> **Status:** ✅ Completed (2026-11-18) — all R2 scope items implemented: migration `03187f6bc661_time_attendance_r2.py` (down_revision `ec80ab59c493`), `alembic check` clean, `tests/v2` 281 passed (29 new), coverage 82.0%, `smoke_time.py` green on `http://127.0.0.1:8090`. Notes: the job queue is a DB-backed implementation (Redis/Dramatiq was intentionally avoided to keep deployment self-hosted and infra-light); exactly-once leave accrual is enforced by a unique `leave_accrual_runs` marker per (org, period, leave type); biometric punches arrive via `POST /api/v1/devices/punches` (HMAC-SHA256, constant-time compare, no session — outside the CSRF-guarded router by design). Payroll-side consumption of the reconciled attendance period (payable-day sync / freeze hooks) lands with the next payroll phase.
+
 - Shifts, weekly-off patterns, effective-dated work schedules.
 - Attendance capture: manual, CSV, biometric device API (HMAC-signed).
 - Derived worked/overtime/late/early with a documented rule engine.
@@ -197,6 +199,8 @@ We are not bolting a hardened product onto the prototype. We are doing a **contr
 - Background worker (Dramatiq + Redis, or PostgreSQL queue), retries, dead-letter, job console.
 - Manager calendar combining leave, attendance, holidays.
 - Data quality: duplicate punch resolution, timezone-aware timestamps, device clock skew policy.
+
+**Rule engine contract** (`peawork/services/attendance.py`, docstring): punches are UTC instants (naive rejected; >15 min future rejected); worked = (out − in) − break; overtime = worked − shift minimum (default 8h); late = check-in − (shift start + grace) compared in org TZ; status HALF_DAY (< half of shift minimum), LATE, else PRESENT; duplicates resolve by min/max (machine sources) or manual overwrite; reconcile is idempotent (HOLIDAY → WEEK_OFF → LEAVE → ABSENT; existing rows untouched).
 
 **Exit:** payroll can consume a frozen, reconciled time period; job failures are visible and retryable.
 

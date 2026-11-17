@@ -57,6 +57,20 @@ class AttendanceStatus(StrEnum):
     REMOTE = "remote"
 
 
+class TimesheetStatus(StrEnum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class JobStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    DEAD_LETTER = "dead_letter"
+
+
 class DocumentCategory(StrEnum):
     IDENTITY = "identity"
     CONTRACT = "contract"

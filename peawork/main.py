@@ -15,6 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
 from . import __version__
+from .api import devices as api_devices
 from .api import v1 as api_v1
 from .config import get_settings
 from .db import create_all, get_engine, session_scope
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(web_org.router)
     app.include_router(web_admin.router)
     app.include_router(api_v1.router)
+    app.include_router(api_devices.router)
 
     _install_error_handlers(app)
     _install_ops_routes(app)

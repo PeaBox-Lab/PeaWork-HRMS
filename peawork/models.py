@@ -42,6 +42,8 @@ from .domain import (
     Role,
     StatutoryRuleType,
     TaxRegime,
+    TimesheetStatus,
+    JobStatus,
 )
 
 
@@ -847,7 +849,185 @@ class LegalEntity(TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class WorkSchedule(TimestampMixin, Base):
+    """Effective-dated org-level weekly-off pattern.
+
+    ``weekly_off`` holds ISO weekday numbers (1 = Monday ... 7 = Sunday).
+    The latest active schedule applicable on a date decides week-off days.
+    """
+
+    __tablename__ = "work_schedules"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", "effective_from", name="uq_work_schedules_org_code_from"),
+        Index("ix_work_schedules_org_effective", "org_id", "effective_from"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)
+    weekly_off: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class BiometricDevice(TimestampMixin, Base):
+    """HMAC-signed biometric punch source (no user session)."""
+
+    __tablename__ = "biometric_devices"
+    __table_args__ = (
+        UniqueConstraint("org_id", "device_code", name="uq_biometric_devices_org_code"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    device_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(120))
+    # Shared HMAC key; used only to verify request signatures, never serialized.
+    secret: Mapped[str] = mapped_column(String(128), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Timesheet(TimestampMixin, Base):
+    __tablename__ = "timesheets"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "week_start", name="uq_timesheets_employee_week"),
+        Index("ix_timesheets_org_status", "org_id", "status"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[TimesheetStatus] = mapped_column(
+        enum_col(TimesheetStatus), default=TimesheetStatus.DRAFT, nullable=False
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approver_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    approver_comment: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+    entries: Mapped[list[TimesheetEntry]] = relationship(
+        back_populates="timesheet", lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+class TimesheetEntry(TimestampMixin, Base):
+    __tablename__ = "timesheet_entries"
+
+    id: Mapped[UUID] = uuid_pk()
+    timesheet_id: Mapped[UUID] = mapped_column(
+        ForeignKey("timesheets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    work_date: Mapped[date] = mapped_column(Date, nullable=False)
+    project_code: Mapped[str | None] = mapped_column(String(40))
+    activity: Mapped[str] = mapped_column(String(200), nullable=False)
+    hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    timesheet: Mapped[Timesheet] = relationship(back_populates="entries")
+
+
+class LeaveAccrualRun(TimestampMixin, Base):
+    """Idempotency marker for leave accrual jobs (one accrual per period/type)."""
+
+    __tablename__ = "leave_accrual_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "period", "leave_type_id", name="uq_leave_accrual_runs_period_type"
+        ),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    period: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    leave_type_id: Mapped[UUID] = mapped_column(
+        ForeignKey("leave_types.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False)
+    employees_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class Job(TimestampMixin, Base):
+    """Database-backed job queue (PostgreSQL-queue style; no Redis required).
+
+    Enqueueing is idempotent via ``idempotency_key``; handlers are
+    responsible for their own exactly-once side effects.
+    """
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_jobs_idempotency_key"),
+        Index("ix_jobs_status_run_at", "status", "run_at"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    payload: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[JobStatus] = mapped_column(
+        enum_col(JobStatus), default=JobStatus.QUEUED, nullable=False
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReviewCycle(TimestampMixin, Base):
+    """A review cycle / check-in period.
+
+    ``start_date`` / ``end_date`` define the window.
+    ``status`` tracks ``draft`` / ``active`` / ``closed``.
+    Employees are assigned to a cycle via ``review_assignments`` (handled
+    by the talent service; the model only stores the cycle metadata).
+    """
+
+    __tablename__ = "review_cycles"
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)  # draft / active / closed
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_review_cycles_org_code"),
+        Index("ix_review_cycles_org_start", "org_id", "start_date"),
+    )
+
+
 __all__ = [
+    "WorkSchedule",
+    "BiometricDevice",
+    "Timesheet",
+    "TimesheetEntry",
+    "LeaveAccrualRun",
+    "Job",
     "AttendanceRecord",
     "AuditEvent",
     "AttendanceStatus",
@@ -884,8 +1064,11 @@ __all__ = [
     "Role",
     "AuditAction",
     "PayComponentType",
+    "TimesheetStatus",
+    "JobStatus",
     "PayrollFrequency",
     "PayrollStatus",
+    "ReviewCycle",
     "StatutoryRuleType",
     "TaxRegime",
     "BenefitType",

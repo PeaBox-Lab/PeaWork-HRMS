@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
@@ -10,8 +10,19 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import csrf_guard, require_user
-from ..domain import AuditAction, DocumentCategory, Role
-from ..models import AuditEvent, Department, Employee, LeaveType, PayrollRun, Position, User
+from ..domain import AuditAction, DocumentCategory, JobStatus, Role, TimesheetStatus
+from ..models import (
+    AuditEvent,
+    BiometricDevice,
+    Department,
+    Employee,
+    LeaveType,
+    PayrollRun,
+    Position,
+    Shift,
+    User,
+    WorkSchedule,
+)
 from ..schemas import (
     AuditEventOut,
     DepartmentCreate,
@@ -57,8 +68,14 @@ from ..services.leave import (
     list_leave_requests,
     request_leave,
 )
+from ..services import attendance as attendance_service
+from ..services import calendar as calendar_service
+from ..services import jobs as jobs_service
 from ..services import payroll as payroll_service
-from ..security import password_problems, verify_password
+from ..services import timesheets as timesheets_service
+from ..services import talent as talent_service
+from ..services.errors import BulkImportError
+from ..security import new_token, password_problems, verify_password
 
 router = APIRouter(prefix="/api/v1", tags=["v1"], dependencies=[Depends(csrf_guard)])
 
@@ -959,3 +976,632 @@ def api_statutory_rule_version_delete(
 
 
 __all__ = ["router"]
+
+
+def _as_utc(dt):
+    """SQLite drops tzinfo on read; reattach UTC before serializing."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+# --- R2: Shifts & Work Schedules ---
+
+
+def _shift_out(s: Shift) -> dict:
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "code": s.code,
+        "start_time": s.start_time.strftime("%H:%M"),
+        "end_time": s.end_time.strftime("%H:%M"),
+        "break_minutes": s.break_minutes,
+        "grace_minutes": s.grace_minutes,
+        "minimum_hours": float(s.minimum_hours),
+        "active": s.active,
+    }
+
+
+def _schedule_out(s: WorkSchedule) -> dict:
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "code": s.code,
+        "weekly_off": [int(d) for d in (s.weekly_off or [])],
+        "effective_from": s.effective_from.isoformat(),
+        "effective_to": s.effective_to.isoformat() if s.effective_to else None,
+        "active": s.active,
+    }
+
+
+@router.get("/shifts", response_model=list[dict])
+def api_shifts(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    shifts = db.scalars(
+        select(Shift).where(Shift.org_id == user.org_id).order_by(Shift.code)
+    ).all()
+    return [_shift_out(s) for s in shifts]
+
+
+@router.post("/shifts", status_code=201)
+def api_shift_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    name = str(payload.get("name") or "").strip()
+    code = str(payload.get("code") or "").strip().upper()
+    if not name or not code:
+        raise ValidationError("name and code are required")
+    try:
+        start_time = datetime.strptime(str(payload.get("start_time") or "").strip(), "%H:%M").time()
+        end_time = datetime.strptime(str(payload.get("end_time") or "").strip(), "%H:%M").time()
+    except ValueError:
+        raise ValidationError("start_time and end_time must be HH:MM") from None
+    from decimal import Decimal as _Decimal
+
+    shift = Shift(
+        org_id=user.org_id,
+        name=name,
+        code=code,
+        start_time=start_time,
+        end_time=end_time,
+        break_minutes=int(payload.get("break_minutes", 60)),
+        grace_minutes=int(payload.get("grace_minutes", 10)),
+        minimum_hours=_Decimal(str(payload.get("minimum_hours", 8))),
+        active=bool(payload.get("active", True)),
+    )
+    db.add(shift)
+    db.flush()
+    audit.record(
+        db, actor=user, action=AuditAction.CREATE, entity_type="shift",
+        entity_id=shift.id, details={"code": shift.code}, org_id=user.org_id,
+    )
+    return _shift_out(shift)
+
+
+@router.put("/shifts/{shift_id}", status_code=200)
+def api_shift_update(
+    shift_id: UUID,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    shift = db.get(Shift, shift_id)
+    if not shift or shift.org_id != user.org_id:
+        from ..services.errors import NotFoundError
+        raise NotFoundError("Shift not found")
+    if "name" in payload:
+        shift.name = str(payload["name"]).strip() or shift.name
+    if "start_time" in payload:
+        shift.start_time = datetime.strptime(str(payload["start_time"]).strip(), "%H:%M").time()
+    if "end_time" in payload:
+        shift.end_time = datetime.strptime(str(payload["end_time"]).strip(), "%H:%M").time()
+    for field in ("break_minutes", "grace_minutes"):
+        if field in payload:
+            setattr(shift, field, int(payload[field]))
+    if "minimum_hours" in payload:
+        from decimal import Decimal as _Decimal
+        shift.minimum_hours = _Decimal(str(payload["minimum_hours"]))
+    if "active" in payload:
+        shift.active = bool(payload["active"])
+    db.add(shift)
+    audit.record(
+        db, actor=user, action=AuditAction.UPDATE, entity_type="shift",
+        entity_id=shift.id, details={"code": shift.code}, org_id=user.org_id,
+    )
+    return _shift_out(shift)
+
+
+@router.get("/work-schedules", response_model=list[dict])
+def api_work_schedules(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    schedules = db.scalars(
+        select(WorkSchedule)
+        .where(WorkSchedule.org_id == user.org_id)
+        .order_by(WorkSchedule.effective_from.desc())
+    ).all()
+    return [_schedule_out(s) for s in schedules]
+
+
+@router.post("/work-schedules", status_code=201)
+def api_work_schedule_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    name = str(payload.get("name") or "").strip()
+    code = str(payload.get("code") or "").strip().upper()
+    weekly_off = payload.get("weekly_off")
+    if not name or not code:
+        raise ValidationError("name and code are required")
+    if not isinstance(weekly_off, list):
+        raise ValidationError("weekly_off must be a list of ISO weekday numbers (1=Mon..7=Sun)")
+    try:
+        days = sorted({int(d) for d in weekly_off})
+        if any(d < 1 or d > 7 for d in days):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValidationError("weekly_off entries must be integers 1..7") from None
+    try:
+        effective_from = date.fromisoformat(str(payload.get("effective_from") or "").strip())
+    except ValueError:
+        raise ValidationError("effective_from must be an ISO date (YYYY-MM-DD)") from None
+    effective_to_raw = payload.get("effective_to")
+    effective_to = date.fromisoformat(str(effective_to_raw)) if effective_to_raw else None
+
+    schedule = WorkSchedule(
+        org_id=user.org_id,
+        name=name,
+        code=code,
+        weekly_off=days,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        active=bool(payload.get("active", True)),
+    )
+    db.add(schedule)
+    db.flush()
+    audit.record(
+        db, actor=user, action=AuditAction.CREATE, entity_type="work_schedule",
+        entity_id=schedule.id, details={"code": schedule.code}, org_id=user.org_id,
+    )
+    return _schedule_out(schedule)
+
+
+# --- R2: Attendance ---
+
+
+def _attendance_out(r) -> dict:
+    return {
+        "id": str(r.id),
+        "employee_id": str(r.employee_id),
+        "attendance_date": r.attendance_date.isoformat(),
+        "shift_id": str(r.shift_id) if r.shift_id else None,
+        "check_in": _as_utc(r.check_in).isoformat() if r.check_in else None,
+        "check_out": _as_utc(r.check_out).isoformat() if r.check_out else None,
+        "worked_minutes": r.worked_minutes,
+        "overtime_minutes": r.overtime_minutes,
+        "status": r.status.value,
+        "source": r.source,
+        "notes": r.notes,
+    }
+
+
+@router.get("/attendance", response_model=list[dict])
+def api_attendance(
+    request: Request,
+    start: date = Query(...),
+    end: date = Query(...),
+    employee_id: UUID | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    records = attendance_service.list_attendance(
+        db, org_id=user.org_id, user=user, start=start, end=end, employee_id=employee_id
+    )
+    audit.record(
+        db, actor=user, action=AuditAction.VIEW, entity_type="attendance_list",
+        details={"start": start.isoformat(), "end": end.isoformat(), "count": len(records)},
+        org_id=user.org_id, request=request,
+    )
+    return [_attendance_out(r) for r in records]
+
+
+@router.put("/attendance/{employee_id}/{attendance_date}", status_code=200)
+def api_attendance_upsert(
+    employee_id: UUID,
+    attendance_date: date,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    data = {**payload, "attendance_date": attendance_date.isoformat()}
+    record = attendance_service.upsert_attendance(
+        db, org_id=user.org_id, actor=user, employee_id=employee_id, data=data
+    )
+    return _attendance_out(record)
+
+
+@router.post("/attendance/import", status_code=200)
+def api_attendance_import(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    raw = file.file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValidationError("CSV must be UTF-8 encoded") from None
+    try:
+        return attendance_service.import_attendance_csv(
+            db, org_id=user.org_id, actor=user, content=content
+        )
+    except BulkImportError as exc:
+        raise ValidationError("; ".join(exc.errors[:20])) from None
+
+
+@router.post("/attendance/reconcile", status_code=200)
+def api_attendance_reconcile(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    on_date_raw = payload.get("on_date")
+    on_date = date.fromisoformat(str(on_date_raw)) if on_date_raw else None
+    return attendance_service.reconcile_attendance(
+        db, org_id=user.org_id, actor=user, on_date=on_date
+    )
+
+
+# --- R2: Timesheets ---
+
+
+def _timesheet_entry_out(e) -> dict:
+    return {
+        "id": str(e.id),
+        "work_date": e.work_date.isoformat(),
+        "project_code": e.project_code,
+        "activity": e.activity,
+        "hours": float(e.hours),
+        "notes": e.notes,
+    }
+
+
+def _timesheet_out(t) -> dict:
+    from decimal import Decimal
+
+    submitted = _as_utc(t.submitted_at)
+    return {
+        "id": str(t.id),
+        "employee_id": str(t.employee_id),
+        "week_start": t.week_start.isoformat(),
+        "status": t.status.value,
+        "submitted_at": submitted.isoformat() if submitted else None,
+        "approver_id": str(t.approver_id) if t.approver_id else None,
+        "approver_comment": t.approver_comment,
+        "total_hours": float(sum((e.hours for e in t.entries), Decimal(0))),
+        "entries": [_timesheet_entry_out(e) for e in t.entries],
+    }
+
+
+@router.post("/timesheets", status_code=201)
+def api_timesheet_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    employee_id_raw = payload.get("employee_id") or (str(user.employee_id) if user.employee_id else None)
+    if not employee_id_raw:
+        raise ValidationError("employee_id is required")
+    timesheet = timesheets_service.create_timesheet(
+        db, org_id=user.org_id, actor=user,
+        employee_id=UUID(str(employee_id_raw)), data=payload,
+    )
+    return _timesheet_out(timesheet)
+
+
+@router.get("/timesheets", response_model=list[dict])
+def api_timesheets(
+    status: TimesheetStatus | None = Query(None),
+    employee_id: UUID | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return [
+        _timesheet_out(t)
+        for t in timesheets_service.list_timesheets(
+            db, org_id=user.org_id, user=user, status=status, employee_id=employee_id
+        )
+    ]
+
+
+@router.post("/timesheets/{timesheet_id}/entries", status_code=201)
+def api_timesheet_entry_create(
+    timesheet_id: UUID,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    entry = timesheets_service.add_entry(
+        db, org_id=user.org_id, actor=user, timesheet_id=timesheet_id, data=payload
+    )
+    return _timesheet_entry_out(entry)
+
+
+@router.post("/timesheets/{timesheet_id}/submit", status_code=200)
+def api_timesheet_submit(
+    timesheet_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return _timesheet_out(
+        timesheets_service.submit_timesheet(db, org_id=user.org_id, actor=user, timesheet_id=timesheet_id)
+    )
+
+
+@router.post("/timesheets/{timesheet_id}/decision", status_code=200)
+def api_timesheet_decision(
+    timesheet_id: UUID,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return _timesheet_out(
+        timesheets_service.decide_timesheet(
+            db, org_id=user.org_id, actor=user, timesheet_id=timesheet_id,
+            decision=str(payload.get("decision") or ""), comment=payload.get("comment"),
+        )
+    )
+
+
+# --- R2: Jobs (DB-backed queue) ---
+
+
+def _job_out(j) -> dict:
+    return {
+        "id": str(j.id),
+        "name": j.name,
+        "idempotency_key": j.idempotency_key,
+        "payload": j.payload,
+        "status": j.status.value,
+        "attempts": j.attempts,
+        "max_attempts": j.max_attempts,
+        "run_at": _as_utc(j.run_at).isoformat(),
+        "last_error": j.last_error,
+        "created_at": _as_utc(j.created_at).isoformat(),
+        "finished_at": _as_utc(j.finished_at).isoformat() if j.finished_at else None,
+    }
+
+
+@router.get("/jobs", response_model=list[dict])
+def api_jobs(
+    status: JobStatus | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return [_job_out(j) for j in jobs_service.list_jobs(db, org_id=user.org_id, user=user, status=status)]
+
+
+@router.post("/jobs/enqueue", status_code=201)
+def api_jobs_enqueue(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    name = str(payload.get("name") or "").strip()
+    body = payload.get("payload") or {}
+    if not isinstance(body, dict):
+        raise ValidationError("payload must be an object")
+    key = str(payload.get("idempotency_key") or "").strip()
+
+    # Eager validation so callers get a 400 here instead of a dead-lettered job.
+    if name == jobs_service.JOB_LEAVE_ACCRUAL:
+        period = str(body.get("period") or "").strip()
+        try:
+            month = int(period[5:])
+            assert 1 <= month <= 12 and len(period) == 7
+        except (ValueError, AssertionError):
+            raise ValidationError("leave_accrual requires payload.period YYYY-MM") from None
+        if not body.get("leave_type_id"):
+            raise ValidationError("leave_accrual requires payload.leave_type_id")
+        if not key:
+            key = f"leave_accrual:{period}:{body['leave_type_id']}"
+    elif name == jobs_service.JOB_ATTENDANCE_RECONCILIATION:
+        on_date_raw = str(body.get("on_date") or "").strip()
+        try:
+            date.fromisoformat(on_date_raw)
+        except ValueError:
+            raise ValidationError("attendance_reconciliation requires payload.on_date YYYY-MM-DD") from None
+        if not key:
+            key = f"attendance_reconciliation:{on_date_raw}"
+    else:
+        raise ValidationError(f"Unknown job type: {name!r}")
+
+    job = jobs_service.enqueue(
+        db, org_id=user.org_id, actor=user, name=name, payload=body, idempotency_key=key
+    )
+    return _job_out(job)
+
+
+@router.post("/jobs/{job_id}/retry", status_code=200)
+def api_jobs_retry(
+    job_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return _job_out(
+        jobs_service.retry_dead_letter(db, org_id=user.org_id, actor=user, job_id=job_id)
+    )
+
+
+# --- R2: Team calendar ---
+
+
+@router.get("/calendar/team", response_model=dict)
+def api_team_calendar(
+    request: Request,
+    month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    result = calendar_service.team_calendar(db, org_id=user.org_id, user=user, month=month)
+    audit.record(
+        db, actor=user, action=AuditAction.VIEW, entity_type="team_calendar",
+        details={"month": month, "employees": len(result["employees"])},
+        org_id=user.org_id, request=request,
+    )
+    return result
+
+
+# --- R2: Biometric devices (admin management; punches go to devices router) ---
+
+
+def _device_out(d, secret: str | None = None) -> dict:
+    out = {
+        "id": str(d.id),
+        "name": d.name,
+        "device_code": d.device_code,
+        "location": d.location,
+        "active": d.active,
+        "last_sync_at": _as_utc(d.last_sync_at).isoformat() if d.last_sync_at else None,
+    }
+    if secret is not None:
+        out["secret"] = secret  # returned exactly once, at creation
+    return out
+
+
+@router.get("/biometric-devices", response_model=list[dict])
+def api_biometric_devices(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    devices = db.scalars(
+        select(BiometricDevice)
+        .where(BiometricDevice.org_id == user.org_id)
+        .order_by(BiometricDevice.device_code)
+    ).all()
+    return [_device_out(d) for d in devices]
+
+
+@router.post("/biometric-devices", status_code=201)
+def api_biometric_device_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    name = str(payload.get("name") or "").strip()
+    code = str(payload.get("device_code") or "").strip().upper()
+    if not name or not code or len(code) > 32:
+        raise ValidationError("name and device_code (max 32 chars) are required")
+    exists = db.scalar(
+        select(BiometricDevice).where(
+            BiometricDevice.org_id == user.org_id, BiometricDevice.device_code == code
+        )
+    )
+    if exists is not None:
+        raise ConflictError("A device with this code already exists")
+
+    secret = new_token()
+    device = BiometricDevice(
+        org_id=user.org_id,
+        name=name,
+        device_code=code,
+        location=(str(payload.get("location") or "").strip() or None),
+        secret=secret,
+        active=bool(payload.get("active", True)),
+    )
+    db.add(device)
+    db.flush()
+    audit.record(
+        db, actor=user, action=AuditAction.CREATE, entity_type="biometric_device",
+        entity_id=device.id, details={"device_code": device.device_code},
+        org_id=user.org_id, request=request,
+    )
+    return _device_out(device, secret=secret)
+
+
+# --- R4: Review cycles ---
+
+
+def _cycle_out(c) -> dict:
+    return {
+        "id": str(c.id),
+        "name": c.name,
+        "code": c.code,
+        "start_date": c.start_date.isoformat(),
+        "end_date": c.end_date.isoformat(),
+        "status": c.status,
+    }
+
+
+@router.post("/review-cycles", status_code=201)
+def api_review_cycle_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    name = str(payload.get("name") or "").strip()
+    code = str(payload.get("code") or "").strip().upper()
+    start = payload.get("start_date")
+    end = payload.get("end_date")
+    if not name or not code or not start or not end:
+        raise ValidationError("name, code, start_date, end_date are required")
+    try:
+        start_date = date.fromisoformat(str(start))
+        end_date = date.fromisoformat(str(end))
+    except ValueError:
+        raise ValidationError("start_date and end_date must be ISO dates (YYYY-MM-DD)")
+    if start_date > end_date:
+        raise ValidationError("start_date must not be after end_date.")
+    return talent_service.create_cycle(
+        db, org_id=user.org_id, actor=user,
+        name=name, code=code, start_date=start_date, end_date=end_date,
+    )
+
+
+@router.get("/review-cycles", response_model=list[dict])
+def api_review_cycles_list(
+    status: str | None = Query(None, pattern="^(draft|active|closed)$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_cycles(db, org_id=user.org_id, user=user)
+
+
+@router.post("/review-cycles/{cycle_code}/close", status_code=200)
+def api_review_cycle_close(
+    cycle_code: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return talent_service.close_cycle(
+        db, org_id=user.org_id, actor=user, cycle_code=cycle_code,
+    )
+
+
+@router.post("/review-cycles/{cycle_code}/enroll", status_code=200)
+def api_review_cycle_enroll(
+    cycle_code: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    employee_id = payload.get("employee_id")
+    if not employee_id:
+        raise ValidationError("employee_id is required")
+    return talent_service.enroll_employee(
+        db, org_id=user.org_id, actor=user,
+        cycle_code=cycle_code, employee_id=str(employee_id),
+    )
+
+
+@router.get("/review-cycles/{cycle_code}", response_model=dict)
+def api_review_cycle_detail(
+    cycle_code: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    cycle = talent_service.get_cycle(db, org_id=user.org_id, cycle_code=cycle_code)
+    return cycle

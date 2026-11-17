@@ -254,6 +254,28 @@ def cmd_reset_password(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_worker(args: argparse.Namespace, settings: Settings) -> int:
+    """Drain the jobs queue once (or on an interval with --interval)."""
+    from .services import jobs as jobs_service
+
+    _require_schema(settings)
+    once = args.once or args.interval <= 0
+    while True:
+        with session_scope() as db:
+            org = get_organization(db)
+            result = jobs_service.run_pending_jobs(db, limit=args.limit, org_id=org.id if org else None)
+        print(
+            f"worker: claimed={result['claimed']} succeeded={result['succeeded']} "
+            f"failed={result['failed']} dead_lettered={result['dead_lettered']}",
+            flush=True,
+        )
+        if once:
+            return 0
+        import time
+
+        time.sleep(args.interval)
+
+
 def cmd_check(args: argparse.Namespace, settings: Settings) -> int:
     print(f"PeaWork {__version__}")
     print(f"  Environment : {settings.env}")
@@ -327,6 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("check", help="Print deployment and database diagnostics")
     check.set_defaults(func=cmd_check)
+
+    worker = sub.add_parser("worker", help="Drain the background jobs queue")
+    worker.add_argument("--once", action="store_true", help="Run one drain pass and exit")
+    worker.add_argument("--interval", type=int, default=0, help="Seconds between passes (0 = once)")
+    worker.add_argument("--limit", type=int, default=10, help="Max jobs per pass")
+    worker.set_defaults(func=cmd_worker)
     return parser
 
 
