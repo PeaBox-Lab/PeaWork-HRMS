@@ -1,0 +1,17 @@
+PeaWork Product Documentation Package
+
+1. PeaWork-Complete-Product-Dossier.docx
+   Comprehensive product dossier covering:
+   - Product vision and architecture
+   - Complete delivered and future feature catalog
+   - Role and access model
+   - Detailed user stories and acceptance criteria
+   - Delivered version history (v0.1.0 through v1.2.0)
+   - Re-baselined future version plan (v1.3.0 through v1.9.0)
+   - Future roadmap, dependencies, release gates, and guardrails
+   - Cumulative changelog
+   - Release notes
+   - Deployment and operations guidance
+   - Security, privacy, compliance, controls, known gaps, and glossary
+
+Document status: Product and delivery planning dossier. Future scope and production certification require the reviews and evidence described in the document.
