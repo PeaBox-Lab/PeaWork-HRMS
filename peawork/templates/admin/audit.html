@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Audit log · PeaWork HRMS{% endblock %}
+{% block heading %}Audit log{% endblock %}
+{% block subheading %}{{ total }} event{% if total != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Audit log</h1>
+    <p>Append-only record of security and data changes. Entries are never edited or deleted by the application.</p>
+  </div>
+  <div class="actions">
+    {% if user.role.value == 'admin' %}<a class="btn btn--ghost" href="/admin/users">Users</a>{% endif %}
+  </div>
+</div>
+
+<form class="filters" method="get" action="/admin/audit">
+  <div class="field">
+    <label for="action">Action</label>
+    <select id="action" name="action">
+      <option value="">All actions</option>
+      {% for item in actions %}
+        <option value="{{ item.value }}" {% if action == item.value %}selected{% endif %}>{{ item.value|replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="entity">Entity type</label>
+    <select id="entity" name="entity">
+      <option value="">All entities</option>
+      {% for item in entity_types %}
+        <option value="{{ item }}" {% if entity == item %}selected{% endif %}>{{ item|replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn--ghost" type="submit">Apply filters</button>
+  {% if action or entity %}<a class="btn btn--ghost" href="/admin/audit">Clear</a>{% endif %}
+</form>
+
+<div class="card">
+  {% if events %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+        {% for event in events %}
+          <tr>
+            <td class="nowrap small">{{ event.created_at|datetime }}</td>
+            <td>
+              <strong class="small">{{ event.actor_email }}</strong>
+              {% if event.actor_id %}<br><small class="muted mono">{{ event.actor_id }}</small>{% endif %}
+            </td>
+            <td><span class="badge">{{ event.action.value|replace('_', ' ') }}</span></td>
+            <td>
+              <strong class="small">{{ event.entity_type|replace('_', ' ')|title }}</strong>
+              {% if event.entity_id %}<br><small class="muted mono">{{ event.entity_id }}</small>{% endif %}
+            </td>
+            <td class="small">
+              {% if event.details %}
+                <code class="mono" style="white-space: pre-wrap;">{{ event.details|tojson }}</code>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td class="small">
+              {{ event.ip or '—' }}
+              {% if event.request_id %}<br><small class="muted mono">{{ event.request_id }}</small>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pages > 1 %}
+      <div class="row" style="justify-content: space-between; margin-top: .9rem;">
+        <span class="muted small">Page {{ page }} of {{ pages }} · {{ total }} events</span>
+        <span class="row">
+          {% if page > 1 %}
+            <a class="btn btn--ghost btn--sm" href="/admin/audit?page={{ page - 1 }}{% if action %}&action={{ action }}{% endif %}{% if entity %}&entity={{ entity }}{% endif %}">Previous</a>
+          {% endif %}
+          {% if page < pages %}
+            <a class="btn btn--ghost btn--sm" href="/admin/audit?page={{ page + 1 }}{% if action %}&action={{ action }}{% endif %}{% if entity %}&entity={{ entity }}{% endif %}">Next</a>
+          {% endif %}
+        </span>
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="empty"><strong>No matching events</strong>Adjust the filters or wait for activity to be recorded.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,49 @@
+[Unit]
+Description=PeaWork HRMS v2
+Documentation=https://github.com/Rajesh/PeaWork-HRMS
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=notify
+User=peawork
+Group=peawork
+WorkingDirectory=/opt/peawork
+EnvironmentFile=/etc/peawork/peawork.env
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/opt/peawork/.venv/bin/alembic upgrade head
+ExecStart=/opt/peawork/.venv/bin/gunicorn \
+    --workers 2 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8090 \
+    --timeout 60 \
+    --graceful-timeout 30 \
+    --access-logfile - \
+    --error-logfile - \
+    --forwarded-allow-ips 127.0.0.1 \
+    peawork.main:app
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+KillSignal=SIGTERM
+
+# Hardening. The app only writes to its document storage and temp space.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/peawork
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
+UMask=027
+
+[Install]
+WantedBy=multi-user.target

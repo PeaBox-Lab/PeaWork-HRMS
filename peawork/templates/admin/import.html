@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Bulk import · PeaWork HRMS{% endblock %}
+{% block heading %}Bulk import{% endblock %}
+{% block subheading %}Upload employees from CSV or Excel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Bulk employee import</h1>
+    <p>Upload a CSV or XLSX file. The entire file is rejected if any row fails, so data stays consistent.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/admin/reports">Reports</a>
+    <a class="btn btn--ghost" href="/admin/settings">Settings</a>
+  </div>
+</div>
+
+{% if result %}
+  <div class="alert alert--success" role="status">
+    <span>
+      Imported <strong>{{ result.created }}</strong> employee{% if result.created != 1 %}s{% endif %}.
+      Created {{ result.departments_created }} department(s) and {{ result.positions_created }} position(s);
+      linked {{ result.managers_linked }} reporting line(s).
+    </span>
+  </div>
+  <div class="grid grid--4" style="margin-bottom: 1rem;">
+    <div class="card"><div class="stat"><span class="stat__label">Employees</span><span class="stat__value">{{ result.created }}</span></div></div>
+    <div class="card"><div class="stat"><span class="stat__label">Departments added</span><span class="stat__value">{{ result.departments_created }}</span></div></div>
+    <div class="card"><div class="stat"><span class="stat__label">Positions added</span><span class="stat__value">{{ result.positions_created }}</span></div></div>
+    <div class="card"><div class="stat"><span class="stat__label">Managers linked</span><span class="stat__value">{{ result.managers_linked }}</span></div></div>
+  </div>
+  <div class="card" style="margin-bottom: 1rem;">
+    <div class="card__header"><h2>Next steps</h2></div>
+    <p class="small muted">Review the new people in the employee register, create sign-in accounts from <a href="/admin/users">Users</a>, and export a verification workbook from <a href="/admin/reports">Reports</a>.</p>
+  </div>
+{% endif %}
+
+{% if errors %}
+  <div class="alert alert--danger" role="alert" style="display: block;">
+    <strong>{{ errors|length }} row{% if errors|length != 1 %}s{% endif %} need attention — nothing was imported.</strong>
+    <ul class="small" style="margin: .5rem 0 0; padding-left: 1.2rem;">
+      {% for item in errors[:60] %}
+        <li>{% if item.row %}Row {{ item.row }}: {% endif %}{{ item.message }}</li>
+      {% endfor %}
+    </ul>
+    {% if errors|length > 60 %}
+      <p class="small" style="margin: .5rem 0 0;">…and {{ errors|length - 60 }} more error(s). Fix the file and upload again.</p>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="grid grid--main">
+  <div class="card">
+    <div class="card__header"><h2>Upload file</h2></div>
+    <form method="post" action="/admin/import" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="form-grid">
+        <div class="field field--full">
+          <label for="file">Employee file</label>
+          <input id="file" name="file" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          <span class="hint">Maximum 5 MB and 2,000 employees per upload. Accepted formats: .csv, .xlsx.</span>
+          {% if filename %}<span class="hint">Last upload: <span class="mono">{{ filename }}</span></span>{% endif %}
+        </div>
+        <div class="field field--full">
+          <label class="row" style="gap: .5rem; font-weight: 500;">
+            <input type="checkbox" name="auto_create" value="1" {% if auto_create %}checked{% endif %}>
+            Create missing departments and positions automatically
+          </label>
+          <span class="hint">When unchecked, every department and position must already exist.</span>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn" type="submit">Validate and import</button>
+        <a class="btn btn--ghost" href="/admin/import">Reset</a>
+      </div>
+    </form>
+
+    <div class="card__header" style="margin-top: 1.5rem;"><h3>Download a template</h3></div>
+    <p class="small muted">Start from the template so headers and date formats match the importer.</p>
+    <div class="row">
+      <a class="btn btn--ghost" href="/admin/import/template.xlsx">Excel template (.xlsx)</a>
+      <a class="btn btn--ghost" href="/admin/import/template.csv">CSV template (.csv)</a>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h3>How the import works</h3></div>
+      <ul class="small muted" style="margin: 0; padding-left: 1.1rem;">
+        <li><strong>All or nothing:</strong> a single bad row rolls back the whole file.</li>
+        <li><strong>Managers second:</strong> reporting lines are resolved after every employee exists, so rows can reference later rows.</li>
+        <li><strong>Auto-create:</strong> unknown departments and positions are added using the spreadsheet value as the name.</li>
+        <li><strong>Duplicates:</strong> employee numbers and work emails must be unique, both in the file and the database.</li>
+        <li><strong>Audit:</strong> successful imports are recorded with the filename and counts.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h3>Required columns</h3></div>
+      <div class="kv"><span>Required</span><strong>first_name, last_name</strong></div>
+      <div class="kv"><span>Identity</span><strong>employee_no, work_email</strong></div>
+      <div class="kv"><span>Employment</span><strong>department, position, status</strong></div>
+      <div class="kv"><span>Reporting</span><strong>manager_email or manager_employee_no</strong></div>
+      <div class="kv"><span>Optional</span><strong>phone, dates, gender, location</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+  <div class="card__header"><h2>Column reference</h2></div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>Column</th><th>Required</th><th>Accepted values</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">employee_no</td><td>No</td><td>Unique. Generated automatically when blank.</td></tr>
+        <tr><td class="mono">first_name</td><td>Yes</td><td>Text, up to 80 characters.</td></tr>
+        <tr><td class="mono">last_name</td><td>Yes</td><td>Text, up to 80 characters.</td></tr>
+        <tr><td class="mono">work_email</td><td>No</td><td>Unique email address.</td></tr>
+        <tr><td class="mono">personal_email</td><td>No</td><td>Email address.</td></tr>
+        <tr><td class="mono">phone</td><td>No</td><td>Text, up to 32 characters.</td></tr>
+        <tr><td class="mono">date_of_joining / date_of_birth</td><td>No</td><td>YYYY-MM-DD, DD/MM/YYYY or Excel date cells.</td></tr>
+        <tr><td class="mono">gender</td><td>No</td><td>Free text.</td></tr>
+        <tr><td class="mono">employment_type</td><td>No</td><td>full_time, part_time, contract, intern, consultant.</td></tr>
+        <tr><td class="mono">status</td><td>No</td><td>active, probation, on_leave, notice, exited.</td></tr>
+        <tr><td class="mono">department</td><td>No</td><td>Department code or name.</td></tr>
+        <tr><td class="mono">position</td><td>No</td><td>Position code or title.</td></tr>
+        <tr><td class="mono">manager_email / manager_employee_no</td><td>No</td><td>Email address or employee number. A single <span class="mono">manager</span> column also works.</td></tr>
+        <tr><td class="mono">location</td><td>No</td><td>Office or city.</td></tr>
+        <tr><td class="mono">pan_masked / bank_masked</td><td>No</td><td>Masked identifiers only — never upload full PAN or account numbers.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

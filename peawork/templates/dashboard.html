@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Overview · PeaWork HRMS{% endblock %}
+{% block heading %}Overview{% endblock %}
+{% block subheading %}{{ today.strftime('%A, %d %B %Y') }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Good to see you, {{ user.full_name.split(' ')[0] }}</h1>
+    <p>Here is what needs attention across {{ org.name if org else 'your organisation' }}.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/leave">Leave</a>
+    {% if user.role.value in ('admin', 'hr') %}
+      <a class="btn" href="/employees/new">Add employee</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid grid--4">
+  <div class="card stat">
+    <div class="stat__top">
+      <span class="stat__label">People</span>
+      <span class="stat__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0zM4 21a8 8 0 0 1 16 0"/></svg>
+      </span>
+    </div>
+    <span class="stat__value">{{ employee_count }}</span>
+    <span class="stat__hint">{% if user.role.value in ('admin','hr','auditor','payroll') %}Active directory{% else %}In your scope{% endif %}</span>
+  </div>
+  <div class="card stat">
+    <div class="stat__top">
+      <span class="stat__label">Pending leave</span>
+      <span class="stat__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
+      </span>
+    </div>
+    <span class="stat__value">{{ pending_count }}</span>
+    <span class="stat__hint"><a href="/leave">Review requests</a></span>
+  </div>
+  <div class="card stat">
+    <div class="stat__top">
+      <span class="stat__label">Documents</span>
+      <span class="stat__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5"/></svg>
+      </span>
+    </div>
+    <span class="stat__value">{{ document_count }}</span>
+    <span class="stat__hint"><a href="/documents">Open document register</a></span>
+  </div>
+  <div class="card stat">
+    <div class="stat__top">
+      <span class="stat__label">Departments</span>
+      <span class="stat__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 21V5l8-3v19M12 8h8v13M7 8h2M7 12h2M7 16h2"/></svg>
+      </span>
+    </div>
+    <span class="stat__value">{{ department_count }}</span>
+    <span class="stat__hint"><a href="/organization">Organisation structure</a></span>
+  </div>
+</div>
+
+<div class="section grid grid--main">
+  <div class="card">
+    <div class="card__header">
+      <h2>Recent leave activity</h2>
+      <span class="spacer"></span>
+      <a class="small" href="/leave">View all</a>
+    </div>
+    {% if recent_leaves %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Status</th></tr></thead>
+          <tbody>
+          {% for leave in recent_leaves %}
+            <tr>
+              <td><strong>{{ leave.employee.full_name }}</strong><br><small class="muted">{{ leave.employee.employee_no }}</small></td>
+              <td>{{ leave.leave_type.name }}</td>
+              <td class="nowrap">{{ leave.start_date|date }} → {{ leave.end_date|date }}</td>
+              <td>{{ leave.days }}</td>
+              <td><span class="badge badge--{{ leave.status.value }}">{{ leave.status.value }}</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty"><strong>No leave activity yet</strong>Requests will appear here once submitted.</div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    {% if balances %}
+      <div class="card">
+        <div class="card__header"><h3>Your leave balance</h3></div>
+        {% for balance in balances %}
+          <div class="kv">
+            <span>{{ balance.leave_type.name }}</span>
+            <strong>{{ balance.available }} / {{ balance.opening }}</strong>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>Upcoming holidays</h3></div>
+      {% if upcoming_holidays %}
+        {% for holiday in upcoming_holidays %}
+          <div class="kv">
+            <span>{{ holiday.name }}</span>
+            <strong>{{ holiday.holiday_date|date('%d %b') }}</strong>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted small">No holidays configured.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header">
+        <h3>Notifications</h3>
+        <span class="spacer"></span>
+        {% if unread_notifications %}<span class="badge badge--pending">{{ unread_notifications }} new</span>{% endif %}
+      </div>
+      {% if notifications %}
+        {% for note in notifications %}
+          <div class="kv">
+            <span>
+              <strong class="small">{{ note.title }}</strong><br>
+              <span class="muted small">{{ note.body }}</span>
+            </span>
+            {% if not note.read_at %}
+              <form method="post" action="/notifications/{{ note.id }}/read" class="inline-form">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button class="btn btn--ghost btn--sm" type="submit">Read</button>
+              </form>
+            {% endif %}
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted small">You have no notifications.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if pending %}
+  <div class="section card">
+    <div class="card__header">
+      <h2>Awaiting your approval</h2>
+      <span class="spacer"></span>
+      <a class="small" href="/leave">Open approval queue</a>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead>
+        <tbody>
+        {% for leave in pending %}
+          <tr>
+            <td>{{ leave.employee.full_name }}</td>
+            <td>{{ leave.leave_type.name }}</td>
+            <td class="nowrap">{{ leave.start_date|date }} → {{ leave.end_date|date }}</td>
+            <td>{{ leave.days }}</td>
+            <td class="right">
+              <form method="post" action="/leave/{{ leave.id }}/decision" class="inline-form">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="decision" value="approve">
+                <button class="btn btn--sm" type="submit">Approve</button>
+              </form>
+              <form method="post" action="/leave/{{ leave.id }}/decision" class="inline-form">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="decision" value="reject">
+                <button class="btn btn--ghost btn--sm" type="submit">Reject</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

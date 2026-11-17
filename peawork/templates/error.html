@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} · PeaWork HRMS{% endblock %}
+{% block heading %}Request not completed{% endblock %}
+{% block subheading %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 680px; margin: 2rem auto; text-align: center;">
+  <p class="stat__label">Error {{ code }}</p>
+  <h1 style="margin: .4rem 0 .6rem;">Something needs your attention</h1>
+  <p class="muted">{{ message }}</p>
+  <div class="form-actions" style="justify-content: center; border: 0; padding-top: .5rem;">
+    <a class="btn" href="/">Back to dashboard</a>
+    <a class="btn btn--ghost" href="/employees">People</a>
+  </div>
+</div>
+{% endblock %}
+{% block auth_content %}
+<div class="auth-layout">
+  <div class="login-card" style="text-align: center;">
+    <p class="stat__label">Error {{ code }}</p>
+    <h1 style="margin: .4rem 0 .6rem;">Something needs your attention</h1>
+    <p class="muted">{{ message }}</p>
+    <div class="form-actions" style="justify-content: center;">
+      <a class="btn" href="/login">Go to sign in</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

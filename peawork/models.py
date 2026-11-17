@@ -1,0 +1,497 @@
+from __future__ import annotations
+
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+    Uuid,
+    false,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .db import Base
+from .domain import (
+    AttendanceStatus,
+    AuditAction,
+    DocumentCategory,
+    EmployeeStatus,
+    EmploymentType,
+    LeaveStatus,
+    NotificationKind,
+    Role,
+)
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def enum_col(enum_cls: type) -> SAEnum:
+    return SAEnum(
+        enum_cls,
+        native_enum=False,
+        length=40,
+        values_callable=lambda x: [e.value for e in x],
+        validate_strings=True,
+    )
+
+
+def uuid_pk() -> Mapped[UUID]:
+    return mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+
+
+def bigint_pk() -> Mapped[int]:
+    # SQLite only autoincrements a column declared exactly INTEGER PRIMARY KEY.
+    return mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+
+
+class TimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class Organization(TimestampMixin, Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    legal_name: Mapped[str | None] = mapped_column(String(200))
+    country_code: Mapped[str] = mapped_column(String(2), default="IN", nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    address: Mapped[str | None] = mapped_column(Text)
+    logo_key: Mapped[str | None] = mapped_column(String(255))
+
+    departments: Mapped[list["Department"]] = relationship(back_populates="organization")
+    employees: Mapped[list["Employee"]] = relationship(back_populates="organization")
+
+
+class User(TimestampMixin, Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        Index("ix_users_role_active", "role", "active"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[Role] = mapped_column(enum_col(Role), default=Role.EMPLOYEE, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_sample: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
+    employee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"), index=True
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    employee: Mapped["Employee | None"] = relationship(foreign_keys=[employee_id], lazy="selectin")
+    sessions: Mapped[list["Session"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+    __table_args__ = (Index("ix_sessions_user_active", "user_id", "revoked_at"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    csrf_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(255))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="sessions", lazy="joined")
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    __table_args__ = (Index("ix_login_attempts_lookup", "email", "ip", "created_at"),)
+
+    id: Mapped[int] = bigint_pk()
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    ip: Mapped[str | None] = mapped_column(String(64))
+    success: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class Department(TimestampMixin, Base):
+    __tablename__ = "departments"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_departments_org_code"),
+        Index("ix_departments_org_active", "org_id", "active"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)
+    parent_id: Mapped[UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="SET NULL"))
+    manager_employee_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), index=True)
+    cost_center: Mapped[str | None] = mapped_column(String(64))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_sample: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="departments")
+    parent: Mapped["Department | None"] = relationship(remote_side=[id], lazy="selectin")
+    employees: Mapped[list["Employee"]] = relationship(
+        back_populates="department", foreign_keys="Employee.department_id"
+    )
+
+
+class Position(TimestampMixin, Base):
+    __tablename__ = "positions"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_positions_org_code"),
+        Index("ix_positions_org_active", "org_id", "active"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)
+    department_id: Mapped[UUID | None] = mapped_column(ForeignKey("departments.id", ondelete="SET NULL"))
+    grade: Mapped[str | None] = mapped_column(String(24))
+    level: Mapped[str | None] = mapped_column(String(24))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_sample: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
+
+    department: Mapped[Department | None] = relationship(lazy="selectin")
+
+
+class Employee(TimestampMixin, Base):
+    __tablename__ = "employees"
+    __table_args__ = (
+        UniqueConstraint("org_id", "employee_no", name="uq_employees_org_employee_no"),
+        UniqueConstraint("org_id", "work_email", name="uq_employees_org_work_email"),
+        Index("ix_employees_org_status", "org_id", "status"),
+        Index("ix_employees_org_department", "org_id", "department_id"),
+        Index("ix_employees_manager", "manager_id"),
+        Index("ix_employees_org_sample", "org_id", "is_sample"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_no: Mapped[str] = mapped_column(String(32), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    work_email: Mapped[str | None] = mapped_column(String(255))
+    personal_email: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(32))
+    date_of_joining: Mapped[date | None] = mapped_column(Date)
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
+    gender: Mapped[str | None] = mapped_column(String(24))
+    employment_type: Mapped[EmploymentType] = mapped_column(
+        enum_col(EmploymentType), default=EmploymentType.FULL_TIME, nullable=False
+    )
+    status: Mapped[EmployeeStatus] = mapped_column(
+        enum_col(EmployeeStatus), default=EmployeeStatus.ACTIVE, nullable=False
+    )
+    department_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="SET NULL")
+    )
+    position_id: Mapped[UUID | None] = mapped_column(ForeignKey("positions.id", ondelete="SET NULL"))
+    manager_id: Mapped[UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
+    location: Mapped[str | None] = mapped_column(String(120), default="Gurugram")
+    pan_masked: Mapped[str | None] = mapped_column(String(32))
+    bank_masked: Mapped[str | None] = mapped_column(String(32))
+    is_sample: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="employees")
+    department: Mapped[Department | None] = relationship(
+        back_populates="employees", foreign_keys=[department_id], lazy="selectin"
+    )
+    position: Mapped[Position | None] = relationship(lazy="selectin")
+    manager: Mapped["Employee | None"] = relationship(
+        remote_side=[id], foreign_keys=[manager_id], lazy="selectin"
+    )
+    reports: Mapped[list["Employee"]] = relationship(
+        back_populates="manager", foreign_keys=[manager_id]
+    )
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
+
+
+class EmployeeHistory(Base):
+    __tablename__ = "employee_history"
+    __table_args__ = (Index("ix_employee_history_employee_date", "employee_id", "effective_date"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False
+    )
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    change_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text)
+    new_value: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class LeaveType(TimestampMixin, Base):
+    __tablename__ = "leave_types"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_leave_types_org_code"),
+        Index("ix_leave_types_org_active", "org_id", "active"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)
+    annual_entitlement: Mapped[Decimal] = mapped_column(
+        Numeric(6, 1), default=Decimal("0"), nullable=False
+    )
+    carry_forward_limit: Mapped[Decimal] = mapped_column(
+        Numeric(6, 1), default=Decimal("0"), nullable=False
+    )
+    paid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class LeaveBalance(TimestampMixin, Base):
+    __tablename__ = "leave_balances"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_id", "leave_type_id", "year", name="uq_leave_balances_employee_type_year"
+        ),
+        Index("ix_leave_balances_org_year", "org_id", "year"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leave_type_id: Mapped[UUID] = mapped_column(
+        ForeignKey("leave_types.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    opening: Mapped[Decimal] = mapped_column(Numeric(7, 1), default=Decimal("0"), nullable=False)
+    accrued: Mapped[Decimal] = mapped_column(Numeric(7, 1), default=Decimal("0"), nullable=False)
+    used: Mapped[Decimal] = mapped_column(Numeric(7, 1), default=Decimal("0"), nullable=False)
+
+    leave_type: Mapped[LeaveType] = relationship(lazy="selectin")
+
+    @property
+    def available(self) -> Decimal:
+        return (self.opening or Decimal("0")) + (self.accrued or Decimal("0")) - (self.used or Decimal("0"))
+
+
+class LeaveRequest(TimestampMixin, Base):
+    __tablename__ = "leave_requests"
+    __table_args__ = (
+        Index("ix_leave_requests_org_status", "org_id", "status"),
+        Index("ix_leave_requests_employee_dates", "employee_id", "start_date", "end_date"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leave_type_id: Mapped[UUID] = mapped_column(
+        ForeignKey("leave_types.id", ondelete="RESTRICT"), nullable=False
+    )
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    days: Mapped[Decimal] = mapped_column(Numeric(6, 1), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[LeaveStatus] = mapped_column(
+        enum_col(LeaveStatus), default=LeaveStatus.PENDING, nullable=False
+    )
+    approver_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    approver_comment: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+    leave_type: Mapped[LeaveType] = relationship(lazy="selectin")
+    approver: Mapped[User | None] = relationship(lazy="selectin")
+
+
+class Holiday(TimestampMixin, Base):
+    __tablename__ = "holidays"
+    __table_args__ = (
+        UniqueConstraint("org_id", "holiday_date", name="uq_holidays_org_date"),
+        Index("ix_holidays_org_date", "org_id", "holiday_date"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    holiday_date: Mapped[date] = mapped_column(Date, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(120), default="All")
+    optional: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class Shift(TimestampMixin, Base):
+    __tablename__ = "shifts"
+    __table_args__ = (UniqueConstraint("org_id", "code", name="uq_shifts_org_code"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    break_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    grace_minutes: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    minimum_hours: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("8"), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class AttendanceRecord(TimestampMixin, Base):
+    __tablename__ = "attendance_records"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "attendance_date", name="uq_attendance_employee_date"),
+        Index("ix_attendance_org_date", "org_id", "attendance_date"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False)
+    shift_id: Mapped[UUID | None] = mapped_column(ForeignKey("shifts.id", ondelete="SET NULL"))
+    check_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    check_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worked_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    overtime_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[AttendanceStatus] = mapped_column(
+        enum_col(AttendanceStatus), default=AttendanceStatus.PRESENT, nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+
+
+class Document(TimestampMixin, Base):
+    __tablename__ = "documents"
+    __table_args__ = (Index("ix_documents_org_employee", "org_id", "employee_id"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), index=True
+    )
+    category: Mapped[DocumentCategory] = mapped_column(
+        enum_col(DocumentCategory), default=DocumentCategory.OTHER, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_on: Mapped[date | None] = mapped_column(Date)
+    uploaded_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    employee: Mapped[Employee | None] = relationship(back_populates="documents", lazy="selectin")
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_org_created", "org_id", "created_at"),
+        Index("ix_audit_events_entity", "entity_type", "entity_id"),
+    )
+
+    id: Mapped[int] = bigint_pk()
+    org_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), index=True)
+    actor_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    actor_email: Mapped[str] = mapped_column(String(255), default="system", nullable=False)
+    action: Mapped[AuditAction] = mapped_column(enum_col(AuditAction), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(64))
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    ip: Mapped[str | None] = mapped_column(String(64))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_user_read", "user_id", "read_at"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[NotificationKind] = mapped_column(
+        enum_col(NotificationKind), default=NotificationKind.INFO, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(String(255))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

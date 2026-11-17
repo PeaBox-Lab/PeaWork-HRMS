@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Calendar · PeaWork HRMS{% endblock %}
+{% block heading %}Team calendar{% endblock %}
+{% block subheading %}{{ month_start|date('%B %Y') }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ month_start|date('%B %Y') }}</h1>
+    <p>Approved leave and organisation holidays. Weekends are excluded from leave day counts.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost btn--sm" href="/leave/calendar?month={{ prev_month }}">← Previous</a>
+    <a class="btn btn--ghost btn--sm" href="/leave/calendar">Today</a>
+    <a class="btn btn--ghost btn--sm" href="/leave/calendar?month={{ next_month }}">Next →</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap" style="border: 0;">
+    <table class="calendar">
+      <thead>
+        <tr>
+          {% for label in ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') %}
+            <th>{{ label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for week in weeks %}
+          <tr>
+            {% for day in week %}
+              {% if day == 0 %}
+                <td class="is-outside" aria-hidden="true"></td>
+              {% else %}
+                {% set day_date = month_start.replace(day=day) %}
+                <td class="{% if day_date == today %}is-today{% endif %}">
+                  <div class="day">{{ day }}</div>
+                  {% if holidays.get(day_date) %}
+                    <span class="holiday" title="{{ holidays.get(day_date) }}">{{ holidays.get(day_date) }}</span>
+                  {% endif %}
+                  {% for event in events.get(day_date, []) %}
+                    <span class="event" title="{{ event }}">{{ event }}</span>
+                  {% endfor %}
+                </td>
+              {% endif %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section grid grid--2">
+  <div class="card">
+    <div class="card__header"><h3>Holidays this month</h3></div>
+    {% if holidays %}
+      {% for holiday_date, name in holidays.items() %}
+        <div class="kv">
+          <span>{{ name }}</span>
+          <strong class="nowrap">{{ holiday_date|date('%d %b') }}</strong>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted small">No holidays this month.</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="card__header"><h3>Approved absence</h3></div>
+    {% if events %}
+      {% for event_date, items in events.items() %}
+        <div class="kv">
+          <span>{{ event_date|date('%a %d %b') }}<br><small class="muted">{{ items|join(' · ') }}</small></span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted small">No approved leave this month.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

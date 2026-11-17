@@ -1,0 +1,17 @@
+{
+  "name": "PeaWork HRMS",
+  "short_name": "PeaWork",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#0f9d8a",
+  "description": "Open-source HRMS for people, leave, documents and audit.",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

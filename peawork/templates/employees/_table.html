@@ -1,0 +1,51 @@
+<div id="employee-table">
+  {% if employees %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Department</th>
+            <th>Position</th>
+            <th>Status</th>
+            <th>Work email</th>
+            <th>Joined</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for employee in employees %}
+          <tr>
+            <td>
+              <a class="name" href="/employees/{{ employee.id }}">
+                <span class="avatar avatar--sm" aria-hidden="true">{{ employee.first_name|initials(employee.last_name) }}</span>
+                <span>
+                  <strong>{{ employee.full_name }}</strong>
+                  <small class="mono">{{ employee.employee_no }}</small>
+                </span>
+              </a>
+            </td>
+            <td>{{ employee.department.name if employee.department else '—' }}</td>
+            <td>{{ employee.position.title if employee.position else '—' }}</td>
+            <td><span class="badge badge--{{ employee.status.value }}">{{ employee.status.value|replace('_', ' ') }}</span></td>
+            <td>{{ employee.work_email or '—' }}</td>
+            <td class="nowrap">{{ employee.date_of_joining|date if employee.date_of_joining else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pages > 1 %}
+      <nav class="pagination" aria-label="Pagination">
+        {% if page > 1 %}<a href="{{ request.url.include_query_params(page=page-1) }}">Previous</a>{% endif %}
+        <span class="is-current">{{ page }} / {{ pages }}</span>
+        {% if page < pages %}<a href="{{ request.url.include_query_params(page=page+1) }}">Next</a>{% endif %}
+        <span class="muted small">{{ total }} records</span>
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="card empty">
+      <strong>No employees found</strong>
+      Try a different search or clear the filters.
+    </div>
+  {% endif %}
+</div>

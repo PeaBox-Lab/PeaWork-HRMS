@@ -25,7 +25,7 @@ def authenticated_client():
     c=client(); r=login(c); assert r.status_code==303; c.cookies.update(r.cookies); return c  
 def test_health():  
     with client() as c:  
-        data=c.get('/health').json();assert data['status']=='ok' and data['version']=='1.0.0' and data['deployment']=='local'  
+        data=c.get('/health').json();assert data['status']=='ok' and data['version']=='1.2.0' and data['deployment']=='local'
 def test_auth_and_dashboard():  
     with authenticated_client() as c:  
         assert c.get('/').status_code==200  

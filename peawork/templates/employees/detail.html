@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}{{ employee.full_name }} · PeaWork HRMS{% endblock %}
+{% block heading %}{{ employee.full_name }}{% endblock %}
+{% block subheading %}{{ employee.employee_no }} · {{ employee.department.name if employee.department else 'Unassigned' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="hero">
+    <span class="avatar" aria-hidden="true">{{ employee.first_name|initials(employee.last_name) }}</span>
+    <div>
+      <h1>{{ employee.full_name }}</h1>
+      <p>{{ employee.position.title if employee.position else 'No position' }} · {{ employee.department.name if employee.department else 'No department' }}</p>
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/employees">Back to people</a>
+    {% if can_edit %}<a class="btn" href="/employees/{{ employee.id }}/edit">Edit profile</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid grid--main">
+  <div class="card">
+    <div class="card__header">
+      <h2>Employment profile</h2>
+      <span class="spacer"></span>
+      <span class="badge badge--{{ employee.status.value }}">{{ employee.status.value|replace('_', ' ') }}</span>
+    </div>
+    <dl class="detail-grid">
+      <div><dt>Employee number</dt><dd class="mono">{{ employee.employee_no }}</dd></div>
+      <div><dt>Work email</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+      <div><dt>Phone</dt><dd>{{ employee.phone or '—' }}</dd></div>
+      <div><dt>Personal email</dt><dd>{{ employee.personal_email or '—' }}</dd></div>
+      <div><dt>Date of joining</dt><dd>{{ employee.date_of_joining|date if employee.date_of_joining else '—' }}</dd></div>
+      <div><dt>Date of birth</dt><dd>{{ employee.date_of_birth|date if employee.date_of_birth else '—' }}</dd></div>
+      <div><dt>Employment type</dt><dd>{{ employee.employment_type.value|replace('_', ' ')|title }}</dd></div>
+      <div><dt>Location</dt><dd>{{ employee.location or '—' }}</dd></div>
+      <div><dt>Manager</dt><dd>{% if employee.manager %}<a href="/employees/{{ employee.manager.id }}">{{ employee.manager.full_name }}</a>{% else %}—{% endif %}</dd></div>
+      <div><dt>PAN (masked)</dt><dd class="mono">{{ employee.pan_masked or '—' }}</dd></div>
+      <div><dt>Bank (masked)</dt><dd class="mono">{{ employee.bank_masked or '—' }}</dd></div>
+      <div><dt>Last updated</dt><dd>{{ employee.updated_at|datetime }}</dd></div>
+    </dl>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h3>Leave balances · {{ today.year }}</h3></div>
+      {% if balances %}
+        {% for balance in balances %}
+          <div class="kv">
+            <span>{{ balance.leave_type.name }} <small class="muted">({{ balance.leave_type.code }})</small></span>
+            <strong>{{ balance.available }} <small class="muted">of {{ balance.opening }}</small></strong>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted small">No leave types configured.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h3>Upcoming absence</h3></div>
+      {% set upcoming = leaves|selectattr('status.value', 'equalto', 'approved')|list %}
+      {% if upcoming %}
+        {% for leave in upcoming[:4] %}
+          <div class="kv">
+            <span>{{ leave.leave_type.name }}</span>
+            <strong class="small">{{ leave.start_date|date('%d %b') }} → {{ leave.end_date|date('%d %b') }}</strong>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted small">No approved leave.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="section card">
+  <div class="card__header">
+    <h2>Documents</h2>
+    <span class="spacer"></span>
+    <span class="muted small">{{ documents|length }} file{% if documents|length != 1 %}s{% endif %}</span>
+  </div>
+  {% if documents %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Title</th><th>Category</th><th>File</th><th>Size</th><th>Expires</th><th>Uploaded</th><th></th></tr></thead>
+        <tbody>
+        {% for document in documents %}
+          <tr>
+            <td><strong>{{ document.title }}</strong></td>
+            <td><span class="badge">{{ document.category.value|replace('_', ' ') }}</span></td>
+            <td class="small">{{ document.filename }}</td>
+            <td class="nowrap">{{ (document.size_bytes / 1024)|round(1) }} KB</td>
+            <td class="nowrap">{{ document.expires_on|date if document.expires_on else '—' }}</td>
+            <td class="nowrap">{{ document.created_at|date }}</td>
+            <td class="right nowrap">
+              <a class="btn btn--ghost btn--sm" href="/documents/{{ document.id }}/download">Download</a>
+              {% if can_edit %}
+                <form method="post" action="/documents/{{ document.id }}/delete" class="inline-form" data-confirm="Delete this document permanently?">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="btn btn--danger btn--sm" type="submit">Delete</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty"><strong>No documents yet</strong>Upload contracts, identity proofs and policies below.</div>
+  {% endif %}
+
+  {% if can_upload %}
+    <div class="divider"></div>
+    <h3>Upload a document</h3>
+    <form method="post" action="/employees/{{ employee.id }}/documents" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="form-grid form-grid--3">
+        <div class="field">
+          <label for="title">Title</label>
+          <input id="title" name="title" type="text" required>
+        </div>
+        <div class="field">
+          <label for="category">Category</label>
+          <select id="category" name="category">
+            {% for category in categories %}
+              <option value="{{ category.value }}">{{ category.value|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="expires_on">Expires on</label>
+          <input id="expires_on" name="expires_on" type="date">
+        </div>
+        <div class="field field--full">
+          <label for="file">File</label>
+          <input id="file" name="file" type="file" required accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.txt,.csv">
+          <span class="hint">Allowed: PDF, PNG, JPG, DOC/DOCX, TXT, CSV. Maximum 10 MB. Files are private and every download is audited.</span>
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn" type="submit">Upload document</button></div>
+    </form>
+  {% endif %}
+</div>
+
+<div class="section grid grid--2">
+  <div class="card">
+    <div class="card__header"><h2>Leave history</h2></div>
+    {% if leaves %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Type</th><th>Dates</th><th>Days</th><th>Status</th></tr></thead>
+          <tbody>
+          {% for leave in leaves %}
+            <tr>
+              <td>{{ leave.leave_type.name }}</td>
+              <td class="nowrap">{{ leave.start_date|date('%d %b') }} → {{ leave.end_date|date('%d %b %Y') }}</td>
+              <td>{{ leave.days }}</td>
+              <td><span class="badge badge--{{ leave.status.value }}">{{ leave.status.value }}</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted small">No leave requests recorded.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card__header"><h2>Employee history</h2></div>
+    {% if history %}
+      <ul class="timeline">
+        {% for event in history %}
+          <li>
+            <span class="tl-dot" aria-hidden="true"></span>
+            <div>
+              <strong>{{ event.change_type|replace('_', ' ')|title }}</strong>
+              <small>{{ event.effective_date|date }} · {{ event.new_value or '—' }}</small>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted small">No history events recorded.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

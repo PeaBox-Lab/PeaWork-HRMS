@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Users · PeaWork HRMS{% endblock %}
+{% block heading %}User accounts{% endblock %}
+{% block subheading %}{{ users|length }} account{% if users|length != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>User accounts</h1>
+    <p>Control access, roles and employee links. Password resets revoke all existing sessions.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/admin/audit">Audit log</a>
+    <a class="btn btn--ghost" href="/admin/settings">Settings</a>
+  </div>
+</div>
+
+{% if created_password %}
+  <div class="alert alert--info" role="status">
+    <span>
+      One-time password for <strong>{{ created_email }}</strong>:
+      <code class="mono">{{ created_password }}</code>.
+      Share it securely; it cannot be shown again. The user must change it after signing in.
+    </span>
+  </div>
+{% endif %}
+
+<div class="card">
+  <div class="card__header">
+    <h2>Accounts</h2>
+    <span class="spacer"></span>
+    <span class="muted small">{{ users|selectattr('active')|list|length }} active</span>
+  </div>
+  {% if users %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>User</th><th>Role</th><th>Employee link</th><th>Status</th><th>Last sign-in</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for account in users %}
+          <tr>
+            <td>
+              <strong>{{ account.full_name }}</strong><br>
+              <small class="muted">{{ account.email }}</small>
+              {% if account.id == user.id %}<span class="badge">you</span>{% endif %}
+            </td>
+            <td>
+              <form method="post" action="/admin/users/{{ account.id }}/role" class="row">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <select name="role" aria-label="Role for {{ account.full_name }}">
+                  {% for role in roles %}
+                    <option value="{{ role.value }}" {% if account.role == role %}selected{% endif %}>{{ role.label }}</option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn--ghost btn--sm" type="submit">Save</button>
+              </form>
+            </td>
+            <td>
+              {% if account.employee %}
+                <a href="/employees/{{ account.employee.id }}">{{ account.employee.full_name }}</a><br>
+                <small class="muted">{{ account.employee.employee_no }}</small>
+              {% else %}
+                <span class="muted">Not linked</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge badge--{{ 'active' if account.active else 'exited' }}">{{ 'Active' if account.active else 'Disabled' }}</span>
+              {% if account.must_change_password %}<br><small class="muted">Password change pending</small>{% endif %}
+            </td>
+            <td class="nowrap small">{{ account.last_login_at|datetime if account.last_login_at else 'Never' }}</td>
+            <td class="right nowrap">
+              <form method="post" action="/admin/users/{{ account.id }}/active" class="inline-form">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="active" value="{{ '0' if account.active else '1' }}">
+                <button class="btn btn--ghost btn--sm" type="submit" {% if account.id == user.id and account.active %}disabled title="You cannot deactivate yourself"{% endif %}>
+                  {{ 'Disable' if account.active else 'Enable' }}
+                </button>
+              </form>
+              <form method="post" action="/admin/users/{{ account.id }}/reset-password" class="inline-form" data-confirm="Reset this user's password and sign out all their sessions?">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button class="btn btn--ghost btn--sm" type="submit">Reset password</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty"><strong>No accounts</strong>Create the first user below.</div>
+  {% endif %}
+</div>
+
+<div class="section card">
+  <div class="card__header"><h2>Create user</h2></div>
+  <form method="post" action="/admin/users">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="form-grid form-grid--3">
+      <div class="field">
+        <label for="full_name">Full name</label>
+        <input id="full_name" name="full_name" type="text" required maxlength="160">
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required maxlength="255" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="role">Role</label>
+        <select id="role" name="role">
+          {% for role in roles %}
+            <option value="{{ role.value }}" {% if role.value == 'employee' %}selected{% endif %}>{{ role.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="employee_id">Link to employee</label>
+        <select id="employee_id" name="employee_id">
+          <option value="">Not linked</option>
+          {% for employee in employees %}
+            <option value="{{ employee.id }}">{{ employee.full_name }} · {{ employee.employee_no }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="password">Initial password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password">
+        <span class="hint">Leave blank to generate a one-time password. The user must change it at first sign-in.</span>
+      </div>
+    </div>
+    <div class="form-actions"><button class="btn" type="submit">Create user</button></div>
+  </form>
+</div>
+{% endblock %}

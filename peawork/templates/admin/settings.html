@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Settings · PeaWork HRMS{% endblock %}
+{% block heading %}Organisation settings{% endblock %}
+{% block subheading %}{{ organization.name if organization else 'Not configured' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Organisation settings</h1>
+    <p>Identity, locale and payroll defaults. Changes are recorded in the audit log.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/admin/import">Bulk import</a>
+    <a class="btn btn--ghost" href="/admin/reports">Reports</a>
+    <a class="btn btn--ghost" href="/admin/users">Users</a>
+    <a class="btn btn--ghost" href="/admin/audit">Audit log</a>
+  </div>
+</div>
+
+{% if organization %}
+  <div class="grid grid--main">
+    <div class="card">
+      <div class="card__header"><h2>Profile</h2></div>
+      <form method="post" action="/admin/settings">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <div class="form-grid">
+          <div class="field">
+            <label for="name">Display name</label>
+            <input id="name" name="name" type="text" value="{{ organization.name }}" required maxlength="160">
+          </div>
+          <div class="field">
+            <label for="legal_name">Legal name</label>
+            <input id="legal_name" name="legal_name" type="text" value="{{ organization.legal_name or '' }}" maxlength="200">
+          </div>
+          <div class="field">
+            <label for="timezone">Timezone</label>
+            <input id="timezone" name="timezone" type="text" value="{{ organization.timezone }}" maxlength="64" placeholder="Asia/Kolkata">
+            <span class="hint">IANA timezone name used for attendance and payroll cut-offs.</span>
+          </div>
+          <div class="field">
+            <label for="currency">Currency</label>
+            <input id="currency" name="currency" type="text" value="{{ organization.currency }}" maxlength="3" placeholder="INR">
+            <span class="hint">ISO 4217 three-letter code.</span>
+          </div>
+          <div class="field field--full">
+            <label for="address">Registered address</label>
+            <textarea id="address" name="address" rows="3" maxlength="2000">{{ organization.address or '' }}</textarea>
+          </div>
+        </div>
+        <div class="form-actions"><button class="btn" type="submit">Save settings</button></div>
+      </form>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card__header"><h3>Deployment</h3></div>
+        <div class="kv"><span>Environment</span><strong>{{ settings.env }}</strong></div>
+        <div class="kv"><span>Country</span><strong>{{ organization.country_code }}</strong></div>
+        <div class="kv"><span>Currency</span><strong>{{ organization.currency }}</strong></div>
+        <div class="kv"><span>Timezone</span><strong>{{ organization.timezone }}</strong></div>
+        <div class="kv"><span>Created</span><strong class="small">{{ organization.created_at|datetime }}</strong></div>
+        <div class="kv"><span>Organisation ID</span><strong class="mono small">{{ organization.id }}</strong></div>
+      </div>
+
+      <div class="card">
+        <div class="card__header"><h3>Sample data</h3><span class="spacer"></span><span class="badge">{{ sample_count }} sample</span></div>
+        <p class="small muted">Populate a complete hierarchy for demos and training, then remove it without touching real records.</p>
+        <div class="kv"><span>Employees</span><strong>{{ employee_count }}</strong></div>
+        <div class="kv"><span>Departments</span><strong>{{ department_count }}</strong></div>
+        <div class="kv"><span>Positions</span><strong>{{ position_count }}</strong></div>
+        <form method="post" action="/admin/sample-data" class="stack stack--sm" style="margin-top: .9rem;">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="sample-count">Headcount</label>
+            <input id="sample-count" name="count" type="number" min="10" max="1000" step="1" value="100" required>
+            <span class="hint">10–1,000 employees with CEO, department heads, managers and teams.</span>
+          </div>
+          <label class="row small" style="gap: .5rem;">
+            <input type="checkbox" name="replace" value="1">
+            Replace existing sample data
+          </label>
+          <button class="btn" type="submit">Generate sample data</button>
+        </form>
+        {% if sample_count %}
+          <form method="post" action="/admin/sample-data/clean" style="margin-top: .6rem;" data-confirm="Remove all sample employees, departments and positions? Real records are kept.">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button class="btn btn--ghost" type="submit">Clean sample data</button>
+          </form>
+          <p class="hint" style="margin: .5rem 0 0;">Real employees, users, departments and positions are preserved.</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <div class="card__header"><h3>Operating notes</h3></div>
+        <ul class="small muted" style="margin: 0; padding-left: 1.1rem;">
+          <li>One organisation per deployment in v2.0.</li>
+          <li>Migrations must be applied with <code class="mono">alembic upgrade head</code> in production.</li>
+          <li>Backups cover both PostgreSQL and the document storage volume.</li>
+          <li>Audit events are append-only and retained according to policy.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <div class="card">
+    <div class="empty"><strong>Organisation not found</strong>Run the bootstrap command to initialise this deployment.</div>
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!deploy/.env.example
+deploy/.env
+*.pem
+*.key
+
+# Runtime data: SQLite databases, documents and backups
+data/
+*.db
+*.db-wal
+*.db-shm
+backups/
+
+# Logs and coverage artefacts
+*.log
+.coverage.*
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

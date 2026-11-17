@@ -1,0 +1,19 @@
+# Automatic HTTPS via Caddy. Set PEAWORK_DOMAIN in deploy/.env.
+{$PEAWORK_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# PeaWork already sets CSP, HSTS, frame and referrer headers.
+	reverse_proxy app:8090 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+
+	header {
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

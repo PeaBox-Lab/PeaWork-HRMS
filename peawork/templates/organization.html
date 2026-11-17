@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Organisation · PeaWork HRMS{% endblock %}
+{% block heading %}Organisation{% endblock %}
+{% block subheading %}{{ departments|length }} department{% if departments|length != 1 %}s{% endif %} · {{ positions|length }} position{% if positions|length != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Organisation structure</h1>
+    <p>Departments, reporting lines and the position catalogue for {{ org.name if org else 'your organisation' }}.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/employees">People directory</a>
+  </div>
+</div>
+
+<div class="grid grid--4">
+  <div class="card stat">
+    <span class="stat__label">Departments</span>
+    <span class="stat__value">{{ departments|length }}</span>
+    <span class="stat__hint">{{ departments|selectattr('active')|list|length }} active</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Positions</span>
+    <span class="stat__value">{{ positions|length }}</span>
+    <span class="stat__hint">{{ positions|selectattr('active')|list|length }} active</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Employees</span>
+    <span class="stat__value">{{ employees|length }}</span>
+    <span class="stat__hint">All records</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Assigned</span>
+    <span class="stat__value">{{ headcount.values()|sum }}</span>
+    <span class="stat__hint">Employees in a department</span>
+  </div>
+</div>
+
+<div class="section card">
+  <div class="card__header">
+    <h2>Departments</h2>
+    <span class="spacer"></span>
+    <span class="muted small">{{ headcount.values()|sum }} assigned</span>
+  </div>
+  {% if departments %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Department</th><th>Code</th><th>Parent</th><th>Manager</th><th>Cost centre</th><th>Headcount</th><th>Status</th>{% if can_manage %}<th></th>{% endif %}</tr>
+        </thead>
+        <tbody>
+        {% for department in departments %}
+          {% set department_manager = (employees|selectattr('id', 'equalto', department.manager_employee_id)|list|first) %}
+          <tr>
+            <td><strong>{{ department.name }}</strong></td>
+            <td class="mono">{{ department.code }}</td>
+            <td>{{ department.parent.name if department.parent else '—' }}</td>
+            <td>{{ department_manager.full_name if department_manager else '—' }}</td>
+            <td>{{ department.cost_center or '—' }}</td>
+            <td>{{ headcount.get(department.id, 0) }}</td>
+            <td><span class="badge badge--{{ 'active' if department.active else 'exited' }}">{{ 'Active' if department.active else 'Inactive' }}</span></td>
+            {% if can_manage %}
+              <td class="right nowrap">
+                <form method="post" action="/organization/departments/{{ department.id }}/toggle" class="inline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="btn btn--ghost btn--sm" type="submit">{{ 'Deactivate' if department.active else 'Activate' }}</button>
+                </form>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty"><strong>No departments yet</strong>Create the first department below.</div>
+  {% endif %}
+
+  {% if can_manage %}
+    <div class="divider"></div>
+    <h3>Add department</h3>
+    <form method="post" action="/organization/departments">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="form-grid form-grid--3">
+        <div class="field">
+          <label for="dept_name">Name</label>
+          <input id="dept_name" name="name" type="text" required maxlength="120">
+        </div>
+        <div class="field">
+          <label for="dept_code">Code</label>
+          <input id="dept_code" name="code" type="text" required maxlength="24" placeholder="ENG">
+        </div>
+        <div class="field">
+          <label for="dept_parent">Parent department</label>
+          <select id="dept_parent" name="parent_id">
+            <option value="">None (top level)</option>
+            {% for department in departments %}
+              <option value="{{ department.id }}">{{ department.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="dept_manager">Manager</label>
+          <select id="dept_manager" name="manager_employee_id">
+            <option value="">Unassigned</option>
+            {% for employee in employees %}
+              <option value="{{ employee.id }}">{{ employee.full_name }} · {{ employee.employee_no }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="dept_cost_center">Cost centre</label>
+          <input id="dept_cost_center" name="cost_center" type="text" maxlength="64">
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn" type="submit">Create department</button></div>
+    </form>
+  {% endif %}
+</div>
+
+<div class="section card">
+  <div class="card__header">
+    <h2>Positions</h2>
+    <span class="spacer"></span>
+    <span class="muted small">Job catalogue</span>
+  </div>
+  {% if positions %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Title</th><th>Code</th><th>Department</th><th>Grade</th><th>Level</th><th>Status</th>{% if can_manage %}<th></th>{% endif %}</tr>
+        </thead>
+        <tbody>
+        {% for position in positions %}
+          <tr>
+            <td><strong>{{ position.title }}</strong></td>
+            <td class="mono">{{ position.code }}</td>
+            <td>{{ position.department.name if position.department else '—' }}</td>
+            <td>{{ position.grade or '—' }}</td>
+            <td>{{ position.level or '—' }}</td>
+            <td><span class="badge badge--{{ 'active' if position.active else 'exited' }}">{{ 'Active' if position.active else 'Inactive' }}</span></td>
+            {% if can_manage %}
+              <td class="right nowrap">
+                <form method="post" action="/organization/positions/{{ position.id }}/toggle" class="inline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="btn btn--ghost btn--sm" type="submit">{{ 'Deactivate' if position.active else 'Activate' }}</button>
+                </form>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty"><strong>No positions yet</strong>Add a position to build the job catalogue.</div>
+  {% endif %}
+
+  {% if can_manage %}
+    <div class="divider"></div>
+    <h3>Add position</h3>
+    <form method="post" action="/organization/positions">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="form-grid form-grid--3">
+        <div class="field">
+          <label for="position_title">Title</label>
+          <input id="position_title" name="title" type="text" required maxlength="120">
+        </div>
+        <div class="field">
+          <label for="position_code">Code</label>
+          <input id="position_code" name="code" type="text" required maxlength="24" placeholder="ENG-SDE2">
+        </div>
+        <div class="field">
+          <label for="position_department">Department</label>
+          <select id="position_department" name="department_id">
+            <option value="">Unassigned</option>
+            {% for department in departments %}
+              <option value="{{ department.id }}">{{ department.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="position_grade">Grade</label>
+          <input id="position_grade" name="grade" type="text" maxlength="24">
+        </div>
+        <div class="field">
+          <label for="position_level">Level</label>
+          <input id="position_level" name="level" type="text" maxlength="24">
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn" type="submit">Create position</button></div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

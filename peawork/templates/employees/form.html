@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit employee' if employee else 'Add employee' }} · PeaWork HRMS{% endblock %}
+{% block heading %}{{ 'Edit employee' if employee else 'Add employee' }}{% endblock %}
+{% block subheading %}{{ employee.full_name if employee else 'Create a new employee record' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ 'Edit employee' if employee else 'Add employee' }}</h1>
+    <p>{{ 'Update the employment profile. Every change is written to the employee history and audit log.' if employee else 'A hire event is written to employee history when the record is created.' }}</p>
+  </div>
+  <div class="actions"><a class="btn btn--ghost" href="{{ '/employees/' ~ employee.id if employee else '/employees' }}">Cancel</a></div>
+</div>
+
+{% if form_error %}
+  <div class="alert alert--danger" role="alert">{{ form_error }}</div>
+{% endif %}
+
+<form method="post" action="{{ '/employees/' ~ employee.id ~ '/edit' if employee else '/employees/new' }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <div class="card">
+    <div class="section__head"><h2>Identity</h2></div>
+    <div class="form-grid">
+      <div class="field">
+        <label for="employee_no">Employee number</label>
+        <input id="employee_no" name="employee_no" type="text" value="{{ values.get('employee_no', '') }}"
+               placeholder="Auto-generated when blank" {% if employee %}disabled{% endif %}>
+        {% if employee %}<span class="hint">Employee numbers are immutable after hire.</span>{% endif %}
+      </div>
+      <div class="field">
+        <label for="location">Work location</label>
+        <input id="location" name="location" type="text" value="{{ values.get('location', '') }}">
+      </div>
+      <div class="field">
+        <label for="first_name">First name</label>
+        <input id="first_name" name="first_name" type="text" value="{{ values.get('first_name', '') }}" required>
+      </div>
+      <div class="field">
+        <label for="last_name">Last name</label>
+        <input id="last_name" name="last_name" type="text" value="{{ values.get('last_name', '') }}" required>
+      </div>
+      <div class="field">
+        <label for="work_email">Work email</label>
+        <input id="work_email" name="work_email" type="email" value="{{ values.get('work_email', '') }}">
+      </div>
+      <div class="field">
+        <label for="personal_email">Personal email</label>
+        <input id="personal_email" name="personal_email" type="email" value="{{ values.get('personal_email', '') }}">
+      </div>
+      <div class="field">
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="text" value="{{ values.get('phone', '') }}">
+      </div>
+      <div class="field">
+        <label for="gender">Gender</label>
+        <input id="gender" name="gender" type="text" value="{{ values.get('gender', '') }}">
+      </div>
+      <div class="field">
+        <label for="date_of_birth">Date of birth</label>
+        <input id="date_of_birth" name="date_of_birth" type="date" value="{{ values.get('date_of_birth', '') }}">
+      </div>
+      <div class="field">
+        <label for="date_of_joining">Date of joining</label>
+        <input id="date_of_joining" name="date_of_joining" type="date" value="{{ values.get('date_of_joining', '') }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <div class="section__head"><h2>Assignment</h2></div>
+    <div class="form-grid">
+      <div class="field">
+        <label for="employment_type">Employment type</label>
+        <select id="employment_type" name="employment_type">
+          {% for type in employment_types %}
+            <option value="{{ type.value }}" {% if values.get('employment_type', 'full_time') == type.value %}selected{% endif %}>{{ type.value|replace('_', ' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          {% for item in statuses %}
+            <option value="{{ item.value }}" {% if values.get('status', 'active') == item.value %}selected{% endif %}>{{ item.value|replace('_', ' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="department_id">Department</label>
+        <select id="department_id" name="department_id">
+          <option value="">Unassigned</option>
+          {% for dept in departments %}
+            <option value="{{ dept.id }}" {% if values.get('department_id', '') == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="position_id">Position</label>
+        <select id="position_id" name="position_id">
+          <option value="">Unassigned</option>
+          {% for position in positions %}
+            <option value="{{ position.id }}" {% if values.get('position_id', '') == position.id|string %}selected{% endif %}>{{ position.title }}{% if position.department %} · {{ position.department.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="manager_id">Manager</label>
+        <select id="manager_id" name="manager_id">
+          <option value="">No manager</option>
+          {% for manager in managers %}
+            {% if not employee or manager.id != employee.id %}
+              <option value="{{ manager.id }}" {% if values.get('manager_id', '') == manager.id|string %}selected{% endif %}>{{ manager.full_name }} · {{ manager.employee_no }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <div class="section__head"><h2>Sensitive identifiers (masked)</h2></div>
+    <div class="form-grid">
+      <div class="field">
+        <label for="pan_masked">PAN (masked only)</label>
+        <input id="pan_masked" name="pan_masked" type="text" value="{{ values.get('pan_masked', '') }}" placeholder="XXXXX1234X">
+        <span class="hint">Never enter a full PAN or bank number. Store only the approved masked form.</span>
+      </div>
+      <div class="field">
+        <label for="bank_masked">Bank account (masked only)</label>
+        <input id="bank_masked" name="bank_masked" type="text" value="{{ values.get('bank_masked', '') }}" placeholder="XXXXXX6789">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn" type="submit">{{ 'Save changes' if employee else 'Create employee' }}</button>
+      <a class="btn btn--ghost" href="{{ '/employees/' ~ employee.id if employee else '/employees' }}">Cancel</a>
+    </div>
+  </div>
+</form>
+{% endblock %}

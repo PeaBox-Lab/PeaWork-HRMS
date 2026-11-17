@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Sign in · PeaWork HRMS{% endblock %}
+{% block auth_content %}
+<div class="auth-layout">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="brand__mark" aria-hidden="true">P</span>
+      <div>
+        <strong>PeaWork</strong>
+        <small>{{ org.name if org else 'HRMS' }}</small>
+      </div>
+    </div>
+    <h1>Welcome back</h1>
+    <p class="muted">Sign in to manage people, leave and documents.</p>
+
+    {% if error_message %}
+      <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+    {% endif %}
+    {% if flash %}
+      <div class="alert alert--success" role="status">{{ flash }}</div>
+    {% endif %}
+
+    <form method="post" action="/login">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ next or '/' }}">
+      <div class="field">
+        <label for="email">Work email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+
+    <p class="login-footer">
+      Access is logged and audited. Contact your administrator if you need an account.
+    </p>
+  </div>
+</div>
+{% endblock %}

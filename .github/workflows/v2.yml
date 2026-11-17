@@ -1,0 +1,56 @@
+name: v2
+
+on:
+  push:
+    paths:
+      - "peawork/**"
+      - "tests/v2/**"
+      - "requirements/**"
+      - "alembic.ini"
+      - "Makefile"
+      - ".github/workflows/v2.yml"
+  pull_request:
+    paths:
+      - "peawork/**"
+      - "tests/v2/**"
+      - "requirements/**"
+      - "alembic.ini"
+      - "Makefile"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PEAWORK_ENV: test
+      PEAWORK_SECRET_KEY: ci-secret-key-that-is-long-enough-1234567890
+      PEAWORK_DATABASE_URL: sqlite:///./data/ci.db
+      PEAWORK_COOKIE_SECURE: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/v2-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/v2-dev.txt
+
+      - name: Lint
+        run: ruff check peawork tests/v2
+
+      - name: Test
+        run: pytest tests/v2 -q
+
+      - name: Verify migrations
+        run: |
+          mkdir -p data
+          alembic upgrade head
+          alembic check

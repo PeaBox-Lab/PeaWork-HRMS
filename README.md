@@ -1,12 +1,75 @@
-# PeaWork v1.2.0  
+# PeaWork HRMS
+
+PeaWork is an open-source HRMS designed for self-hosting on Linux. The repository
+contains two generations:
+
+| Package | Status | Purpose |
+| --- | --- | --- |
+| `peawork/` | **v2.0 — primary** | Modular FastAPI/PostgreSQL rebuild for production use |
+| `app/` | Legacy v1.2 | Reference implementation kept for migration and audit comparison |
+
+The v2 package is the target for new deployments. It provides authentication,
+employee records, leave, documents, audit logging, an admin area and a JSON API,
+with Alembic migrations, tests, Docker Compose and systemd assets.
+
+## v2 quick start
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements/v2-dev.txt
+
+export PEAWORK_ENV=dev
+export PEAWORK_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+export PEAWORK_DATABASE_URL="sqlite:///./data/peawork_v2.db"
+export PEAWORK_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
+export PEAWORK_BOOTSTRAP_ADMIN_PASSWORD="DevSmokePass123!"
+
+python -m alembic upgrade head
+python -m peawork init --demo
+python -m uvicorn peawork.main:app --reload --port 8090
+```
+
+Open <http://127.0.0.1:8090>. Demo login: `employee@example.com` /
+`EmployeeDemo123!` (manager: `manager@example.com` / `ManagerDemo123!`).
+
+### Sample data, bulk import and Excel reports
+
+The admin area now ships three data-management features:
+
+- **Sample data** — generate a 100-employee hierarchy (CEO → department heads →
+  managers → individual contributors) from `/admin/settings` or
+  `python -m peawork seed-sample --count 100`. Sample records are flagged with
+  `is_sample` and can be removed with `python -m peawork clean-sample` without
+  touching real employees, users, departments or positions.
+- **Bulk import** — upload CSV or XLSX from `/admin/import`. The whole file is
+  validated first; any failing row rolls back the entire upload. Download
+  templates from the same page. Unknown departments and positions can be
+  created automatically, and managers are resolved after every employee exists.
+- **Excel reports** — export the employee register
+  (`/admin/reports/employees.xlsx`) or the full organisation workbook
+  (`/admin/reports/full.xlsx`, nine sheets: summary, employees, departments,
+  positions, leave requests, leave balances, documents, users and audit log).
+  Formula injection is neutralised on every cell.
+
+Run the v2 tests with `pytest tests/v2 -q`. Full setup, production Compose,
+systemd, backups and the security checklist are in
+[`docs/V2_QUICKSTART.md`](docs/V2_QUICKSTART.md). Design and delivery context:
+
+- [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md) — target architecture and ADRs
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — R0–R5 release plan
+- [`docs/AUDIT_2026-11.md`](docs/AUDIT_2026-11.md) — v1 audit findings and pilot gates
+
+## Legacy v1.2.0 reference
+
 Employee and manager experience platform built on Global Core HR. v1.2 adds self-service, unified work, approvals, notifications, documents, team calendar and a mobile-ready PWA while preserving production controls.  
-## Included  
-### HR foundation  
+### Included
+#### HR foundation
 - Secure login, PBKDF2 password hashing, role-based access and audit events  
 - Employee master, effective-dated hire history, departments, positions and manager relationships  
 - Leave requests and approvals, India holiday calendar, document register and CSV export  
 - Operational dashboard, reports, REST API, SQLite local mode and Docker local-server mode  
-### v1.2 Employee Experience
+#### v1.2 Employee Experience
 - Employee profile, assignment, documents and request self-service
 - Approval-gated profile changes and HR service resolution
 - Document acknowledgements and notification preferences
@@ -14,7 +77,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Manager team overview, approval inbox, tasks and calendar
 - Installable responsive PWA with static-shell offline fallback
 
-### v1.1 Global Core HR
+#### v1.1 Global Core HR
 - Global legal entities, work locations, cost centers and projects
 - Job families, job profiles, grades, levels and required skills
 - Global employee identifiers and effective-dated assignments
@@ -24,7 +87,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Employee lifecycle event history
 - Approval-gated offboarding with evidence-based access, asset, handover and payroll tasks
 
-### v1.0 Production hardening candidate
+#### v1.0 Production hardening candidate
 - CSRF, secure response headers, login throttling and revocable tenant-bound sessions
 - Versioned password hashing and default-secret/bootstrap startup gates
 - Upload type/MIME/size controls and fail-closed malware-scanner option
@@ -34,7 +97,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Eight evidence-based production gates for independent security, privacy, accessibility, localization, resilience and performance review
 - Readiness command that fails while evidence is missing or high-risk events remain open
 
-### v0.6 Cloud beta
+#### v0.6 Cloud beta
 - Separate cloud control plane and cloud audit trail
 - Database-per-tenant SQLite and schema-per-tenant PostgreSQL isolation
 - Tenant-bound sessions, subscription limits and custom-domain state
@@ -44,7 +107,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Local SQLite preflight and migration into SQLite or PostgreSQL tenant targets
 - Cloud Compose, environment template and deployment preflight scripts
 
-### v0.5 India payroll beta
+#### v0.5 India payroll beta
 - Configurable earnings, deductions, reimbursements and employer costs
 - Effective-dated salary structures and employee compensation
 - Attendance-linked payable days and loss-of-pay proration
@@ -53,7 +116,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Employee payslips and debit-credit-balanced accounting export
 - Validation gates for statutory components; no statutory rates are represented as filing-ready
 
-### v0.4 Talent
+#### v0.4 Talent
 - Performance cycles, participants and review deadlines
 - Weighted goals/OKRs with alignment, metrics and update history
 - Structured check-ins and evidence-based self/manager reviews
@@ -62,7 +125,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Development plans and measurable actions
 - Calibration sessions, adjusted ratings, performance/potential buckets and rationale
 
-### v0.3 Workforce  
+#### v0.3 Workforce
 - Shifts, weekly-off patterns and effective-dated employee assignments  
 - Attendance with calculated worked/overtime hours and duplicate-safe daily upserts  
 - Overtime requests and approvals  
@@ -71,7 +134,7 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Transactional monthly leave accrual jobs with duplicate-run protection  
 - Monthly manager calendar combining attendance and leave events  
 - One-click Windows setup that remains visible and launches the application  
-### v0.2 Hire-to-onboard  
+#### v0.2 Hire-to-onboard
 - Requisitions with openings, target dates, hiring managers and lifecycle status  
 - Candidate directory, r  sum   registration and source tracking  
 - Candidate-to-requisition applications with a controlled pipeline  
@@ -82,8 +145,8 @@ Employee and manager experience platform built on Global Core HR. v1.2 adds self
 - Probation review scheduling, ratings and confirm/extend/exit recommendations  
 - Atomic employee conversion that creates employee history and closes the successful application/requisition  
 - New authenticated APIs for requisitions, candidates, applications and onboarding plans  
-## Run locally  
-### Windows     one-click setup  
+### Run locally
+#### Windows     one-click setup
 1. Double-click `install.bat`.  
 2. The setup window remains open and reports any installation failure.  
 3. After successful setup, press a key to launch the server and open PeaWork in your browser.  
@@ -92,7 +155,7 @@ Command-line alternative:
 ```bat  
 install.bat  
 ```  
-### Linux/macOS  
+#### Linux/macOS
 ```bash  
 chmod +x install_local.sh  
 ./install_local.sh  
@@ -102,16 +165,16 @@ python run.py
 Open `http://127.0.0.1:8090`.  
 Demo credentials: `admin` / `ChangeMe123!`  
 **Change the password and `PEAWORK_SECRET` before real use.** This remains a functional MVP, not a production compliance certification.  
-## Docker local server  
+### Docker local server
 ```bash  
 export PEAWORK_SECRET='a-long-random-secret'  
 docker compose up -d --build  
 ```  
-## Test  
+### Test
 ```bash  
 pytest -q  
 ```  
-## API  
+### API
 Interactive documentation: `/docs`  
 - `GET /api/v1/employees`  
 - `GET /api/v1/departments`  
@@ -145,7 +208,7 @@ Interactive documentation: `/docs`
 See `docs/ARCHITECTURE.md`, `docs/PRODUCT_REQUIREMENTS.md`, `docs/ROADMAP.md`, `docs/SECURITY.md`, and `docs/V02_HIRE_TO_ONBOARD.md`, `docs/V03_WORKFORCE.md`, and `docs/V04_TALENT.md`, and `docs/V05_PAYROLL_BETA.md`, and `docs/V06_CLOUD_BETA.md`, `docs/V10_PRODUCTION_HARDENING.md`, and `docs/PRODUCTION_CONTROLS.md`, and `docs/V11_GLOBAL_CORE_HR.md`, and `docs/V12_EMPLOYEE_EXPERIENCE.md`.
 
 
-## Cloud beta quick start
+### Cloud beta quick start
 
 ```bash
 cp .env.cloud.example .env
@@ -157,7 +220,7 @@ python scripts/create_object_bucket.py
 Run `python scripts/cloud_preflight.py` in the configured application environment before opening cloud access. The cloud beta records SSO, domain, TLS and PITR orchestration state but requires provider integration and independent validation before production use.
 
 
-## Production readiness
+### Production readiness
 
 The repository is a production-hardening candidate, not a self-certified production release. Configure approved secrets and scanning, complete independent assessments and operational exercises, attach evidence in Production Readiness, then run:
 

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}People · PeaWork HRMS{% endblock %}
+{% block heading %}People directory{% endblock %}
+{% block subheading %}{{ total }} record{% if total != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>People</h1>
+    <p>Search the directory, review assignments and open an employee record.</p>
+  </div>
+  <div class="actions">
+    {% if can_create %}<a class="btn" href="/employees/new">Add employee</a>{% endif %}
+  </div>
+</div>
+
+<form id="filters" class="filters" method="get" action="/employees"
+      hx-get="/employees" hx-target="#employee-table" hx-swap="outerHTML"
+      hx-trigger="keyup changed delay:350ms from:input[name='search'], change from:select"
+      hx-push-url="true">
+  <div class="field field--grow">
+    <label for="search">Search</label>
+    <input id="search" name="search" type="search" value="{{ search }}" placeholder="Name, employee number or email">
+  </div>
+  <div class="field">
+    <label for="department">Department</label>
+    <select id="department" name="department">
+      <option value="">All departments</option>
+      {% for dept in departments %}
+        <option value="{{ dept.id }}" {% if department == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">All statuses</option>
+      {% for item in statuses %}
+        <option value="{{ item.value }}" {% if status == item.value %}selected{% endif %}>{{ item.value|replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn--ghost" type="submit">Apply</button>
+</form>
+
+{% include "employees/_table.html" %}
+{% endblock %}

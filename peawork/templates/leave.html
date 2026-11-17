@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Leave · PeaWork HRMS{% endblock %}
+{% block heading %}Leave{% endblock %}
+{% block subheading %}{{ total }} request{% if total != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Leave</h1>
+    <p>Request time off, track balances and review approvals.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/leave/calendar">Team calendar</a>
+  </div>
+</div>
+
+<div class="grid grid--main">
+  <div class="stack">
+    {% if can_approve and approvals %}
+      <div class="card">
+        <div class="card__header">
+          <h2>Awaiting your approval</h2>
+          <span class="spacer"></span>
+          <span class="badge badge--pending">{{ approvals|length }}</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead>
+            <tbody>
+            {% for leave in approvals %}
+              <tr>
+                <td>
+                  <strong>{{ leave.employee.full_name }}</strong><br>
+                  <small class="muted">{{ leave.employee.employee_no }}</small>
+                </td>
+                <td>{{ leave.leave_type.name }}</td>
+                <td class="nowrap">{{ leave.start_date|date }} → {{ leave.end_date|date }}</td>
+                <td>{{ leave.days }}</td>
+                <td class="right nowrap">
+                  <form method="post" action="/leave/{{ leave.id }}/decision" class="inline-form">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="decision" value="approve">
+                    <button class="btn btn--sm" type="submit">Approve</button>
+                  </form>
+                  <form method="post" action="/leave/{{ leave.id }}/decision" class="inline-form">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="decision" value="reject">
+                    <button class="btn btn--ghost btn--sm" type="submit">Reject</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header">
+        <h2>Request history</h2>
+        <span class="spacer"></span>
+        <form class="row" method="get" action="/leave">
+          <label class="small muted" for="status">Status</label>
+          <select id="status" name="status" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for value in ('pending', 'approved', 'rejected', 'cancelled') %}
+              <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ value|title }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button class="btn btn--ghost btn--sm" type="submit">Filter</button></noscript>
+        </form>
+      </div>
+
+      {% if leaves %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th>Reason</th><th></th></tr>
+            </thead>
+            <tbody>
+            {% for leave in leaves %}
+              <tr>
+                <td>
+                  <a href="/employees/{{ leave.employee.id }}">{{ leave.employee.full_name }}</a><br>
+                  <small class="muted">{{ leave.employee.employee_no }}</small>
+                </td>
+                <td>{{ leave.leave_type.name }}</td>
+                <td class="nowrap">
+                  {{ leave.start_date|date('%d %b') }} → {{ leave.end_date|date('%d %b %Y') }}
+                  {% if leave.start_date == leave.end_date %}<br><small class="muted">Single day</small>{% endif %}
+                </td>
+                <td>{{ leave.days }}</td>
+                <td><span class="badge badge--{{ leave.status.value }}">{{ leave.status.value|replace('_', ' ') }}</span></td>
+                <td class="small">{{ leave.reason or '—' }}</td>
+                <td class="right nowrap">
+                  {% if leave.status.value == 'pending' and can_approve and leave.employee_id != user.employee_id %}
+                    <form method="post" action="/leave/{{ leave.id }}/decision" class="inline-form">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="decision" value="approve">
+                      <button class="btn btn--sm" type="submit">Approve</button>
+                    </form>
+                    <form method="post" action="/leave/{{ leave.id }}/decision" class="inline-form">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                      <input type="hidden" name="decision" value="reject">
+                      <button class="btn btn--ghost btn--sm" type="submit">Reject</button>
+                    </form>
+                  {% endif %}
+                  {% if leave.status.value in ('pending', 'approved') and (leave.employee_id == user.employee_id or user.role.value in ('admin', 'hr')) %}
+                    <form method="post" action="/leave/{{ leave.id }}/cancel" class="inline-form" data-confirm="Cancel this leave request?">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                      <button class="btn btn--ghost btn--sm" type="submit">Cancel</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if pages > 1 %}
+          <div class="row" style="justify-content: space-between; margin-top: .9rem;">
+            <span class="muted small">Page {{ page }} of {{ pages }}</span>
+            <span class="row">
+              {% if page > 1 %}
+                <a class="btn btn--ghost btn--sm" href="/leave?page={{ page - 1 }}{% if status %}&status={{ status }}{% endif %}">Previous</a>
+              {% endif %}
+              {% if page < pages %}
+                <a class="btn btn--ghost btn--sm" href="/leave?page={{ page + 1 }}{% if status %}&status={{ status }}{% endif %}">Next</a>
+              {% endif %}
+            </span>
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="empty"><strong>No leave requests</strong>Requests you submit or can review will appear here.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stack">
+    {% if can_approve or employees %}
+      <div class="card">
+        <div class="card__header"><h2>New request</h2></div>
+        <form method="post" action="/leave/request">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="stack stack--sm">
+            {% if employees %}
+              <div class="field">
+                <label for="employee_id">Employee</label>
+                <select id="employee_id" name="employee_id">
+                  {% for employee in employees %}
+                    <option value="{{ employee.id }}">{{ employee.full_name }} · {{ employee.employee_no }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% else %}
+              <input type="hidden" name="employee_id" value="">
+            {% endif %}
+            <div class="field">
+              <label for="leave_type_id">Leave type</label>
+              <select id="leave_type_id" name="leave_type_id" required>
+                {% for leave_type in leave_types %}
+                  <option value="{{ leave_type.id }}">{{ leave_type.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="start_date">Start date</label>
+                <input id="start_date" name="start_date" type="date" required>
+              </div>
+              <div class="field">
+                <label for="end_date">End date</label>
+                <input id="end_date" name="end_date" type="date" required>
+              </div>
+            </div>
+            <label class="row small">
+              <input type="checkbox" name="half_day" value="1">
+              Half day (start and end date must match)
+            </label>
+            <div class="field">
+              <label for="reason">Reason</label>
+              <textarea id="reason" name="reason" rows="3" maxlength="1000"></textarea>
+            </div>
+            <button class="btn" type="submit" {% if not leave_types %}disabled{% endif %}>Submit request</button>
+            {% if not leave_types %}<span class="hint">No active leave types are configured.</span>{% endif %}
+          </div>
+        </form>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>My balances · {{ today.year }}</h3></div>
+      {% if balances %}
+        {% for balance in balances %}
+          <div class="kv">
+            <span>{{ balance.leave_type.name }} <small class="muted">({{ balance.leave_type.code }})</small></span>
+            <strong>{{ balance.available }} <small class="muted">/ {{ balance.opening }}</small></strong>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted small">Your account is not linked to an employee record, so no balances are shown.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h3>Upcoming holidays</h3></div>
+      {% if holidays %}
+        {% for holiday in holidays %}
+          <div class="kv">
+            <span>{{ holiday.name }}{% if holiday.optional %} <span class="badge">optional</span>{% endif %}</span>
+            <strong class="nowrap">{{ holiday.holiday_date|date('%d %b') }}</strong>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted small">No upcoming holidays configured.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

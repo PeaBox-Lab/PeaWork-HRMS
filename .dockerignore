@@ -1,0 +1,32 @@
+# Build context exclusions for the v2 runtime image.
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Local configuration and secrets
+.env
+.env.*
+deploy/.env
+*.pem
+*.key
+
+# Runtime data and artefacts
+data
+*.db
+*.db-wal
+*.db-shm
+backups
+*.log
+
+# Legacy v1 application is not part of the v2 image
+app
+tests
+docs
+scripts

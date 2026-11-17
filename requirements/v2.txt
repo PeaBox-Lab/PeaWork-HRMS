@@ -1,0 +1,15 @@
+# PeaWork HRMS v2 runtime dependencies (Linux production + local development)
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+gunicorn>=22,<24
+sqlalchemy>=2.0,<2.2
+alembic>=1.13,<2.0
+psycopg[binary]>=3.2,<4
+pydantic>=2.8,<3.0
+pydantic-settings>=2.4,<3.0
+email-validator>=2.2,<3.0
+jinja2>=3.1,<4.0
+python-multipart>=0.0.9,<1.0
+argon2-cffi>=23.1,<26.0
+openpyxl>=3.1,<4.0
+prometheus-client>=0.20,<1.0

@@ -1,0 +1,63 @@
+name: peawork
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-peawork}
+      POSTGRES_USER: ${POSTGRES_USER:-peawork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - peawork_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-peawork} -d ${POSTGRES_DB:-peawork}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [peawork]
+    # Not published: only the application network can reach PostgreSQL.
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PEAWORK_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-peawork}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-peawork}
+    volumes:
+      - peawork_documents:/var/lib/peawork/documents
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks: [peawork]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      PEAWORK_DOMAIN: ${PEAWORK_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [peawork]
+
+volumes:
+  peawork_db:
+  peawork_documents:
+  caddy_data:
+  caddy_config:
+
+networks:
+  peawork:
+    driver: bridge

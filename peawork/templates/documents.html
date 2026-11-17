@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Documents · PeaWork HRMS{% endblock %}
+{% block heading %}Document register{% endblock %}
+{% block subheading %}{{ documents|length }} file{% if documents|length != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Documents</h1>
+    <p>Private employee files. Every download is written to the audit log.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/employees">Open people directory</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header">
+    <h2>Files</h2>
+    <span class="spacer"></span>
+    <span class="muted small">PDF, PNG, JPG, DOC/DOCX, TXT and CSV · up to 10 MB each</span>
+  </div>
+  {% if documents %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Title</th><th>Employee</th><th>Category</th><th>File</th><th>Size</th><th>Expires</th><th>Uploaded</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for document in documents %}
+          <tr>
+            <td><strong>{{ document.title }}</strong></td>
+            <td>
+              {% if document.employee %}
+                <a href="/employees/{{ document.employee.id }}">{{ document.employee.full_name }}</a><br>
+                <small class="muted">{{ document.employee.employee_no }}</small>
+              {% else %}
+                <span class="muted">Organisation-wide</span>
+              {% endif %}
+            </td>
+            <td><span class="badge">{{ document.category.value|replace('_', ' ') }}</span></td>
+            <td class="small">{{ document.filename }}</td>
+            <td class="nowrap">{{ (document.size_bytes / 1024)|round(1) }} KB</td>
+            <td class="nowrap">{{ document.expires_on|date if document.expires_on else '—' }}</td>
+            <td class="nowrap">{{ document.created_at|date }}</td>
+            <td class="right nowrap">
+              <a class="btn btn--ghost btn--sm" href="/documents/{{ document.id }}/download">Download</a>
+              {% if can_delete %}
+                <form method="post" action="/documents/{{ document.id }}/delete" class="inline-form" data-confirm="Delete this document permanently?">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="btn btn--danger btn--sm" type="submit">Delete</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty">
+      <strong>No documents in your scope</strong>
+      Upload files from an employee record. You only see documents you are allowed to access.
+    </div>
+  {% endif %}
+</div>
+
+<div class="section card">
+  <div class="card__header"><h3>Document categories</h3></div>
+  <div class="row">
+    {% for category in categories %}
+      <span class="badge">{{ category.value|replace('_', ' ')|title }}</span>
+    {% endfor %}
+  </div>
+  <p class="muted small" style="margin-top: .8rem;">
+    Store only masked identifiers in employee records. Full identity and bank documents belong in this register, not in free-text fields.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Reports · PeaWork HRMS{% endblock %}
+{% block heading %}Excel reports{% endblock %}
+{% block subheading %}Download organisation data{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Excel reports</h1>
+    <p>Export live HR data as Excel workbooks. Downloads are recorded in the audit log.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/admin/import">Bulk import</a>
+    <a class="btn btn--ghost" href="/admin/settings">Settings</a>
+  </div>
+</div>
+
+<div class="grid grid--4" style="margin-bottom: 1rem;">
+  <div class="card"><div class="stat"><span class="stat__label">Employees</span><span class="stat__value">{{ employee_count }}</span><span class="stat__hint">{{ sample_count }} sample record(s)</span></div></div>
+  <div class="card"><div class="stat"><span class="stat__label">Departments</span><span class="stat__value">{{ department_count }}</span><span class="stat__hint">Full hierarchy in the workbook</span></div></div>
+  <div class="card"><div class="stat"><span class="stat__label">Positions</span><span class="stat__value">{{ position_count }}</span><span class="stat__hint">Titles, grades and levels</span></div></div>
+  <div class="card"><div class="stat"><span class="stat__label">Organisation</span><span class="stat__value" style="font-size: 1.1rem;">{{ organization.name if organization else 'Not configured' }}</span><span class="stat__hint">{{ organization.currency if organization else '' }}</span></div></div>
+</div>
+
+<div class="grid grid--2">
+  <div class="card">
+    <div class="card__header">
+      <h2>Employee register</h2>
+      <span class="spacer"></span>
+      <span class="badge">.xlsx</span>
+    </div>
+    <p class="small muted">A single clean sheet with every employee, their department, position, manager, contact details and employment status. Best for sharing a current headcount list.</p>
+    <ul class="small muted" style="margin: 0 0 1rem; padding-left: 1.1rem;">
+      <li>Employee number, name and contact fields</li>
+      <li>Department, position and reporting manager</li>
+      <li>Joining date, location and status</li>
+      <li>Sample-data marker column</li>
+    </ul>
+    <a class="btn" href="/admin/reports/employees.xlsx">Download employee register</a>
+  </div>
+
+  <div class="card">
+    <div class="card__header">
+      <h2>Full organisation report</h2>
+      <span class="spacer"></span>
+      <span class="badge">9 sheets</span>
+    </div>
+    <p class="small muted">Everything in one workbook for audits, migration, or offline analysis. Each dataset gets its own formatted sheet with filters and frozen headers.</p>
+    <ul class="small muted" style="margin: 0 0 1rem; padding-left: 1.1rem;">
+      <li>Summary and employee register</li>
+      <li>Departments and positions with headcounts</li>
+      <li>Leave requests and leave balances</li>
+      <li>Documents, user accounts and audit log</li>
+    </ul>
+    <a class="btn" href="/admin/reports/full.xlsx">Download full workbook</a>
+  </div>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+  <div class="card__header"><h2>Export notes</h2></div>
+  <div class="grid grid--3">
+    <div>
+      <h3>Live data</h3>
+      <p class="small muted">Workbooks are generated from the database at download time, so they always reflect the latest records and sample-data state.</p>
+    </div>
+    <div>
+      <h3>Safe cells</h3>
+      <p class="small muted">Text beginning with <span class="mono">=</span>, <span class="mono">+</span>, <span class="mono">-</span> or <span class="mono">@</span> is escaped to prevent spreadsheet formula injection.</p>
+    </div>
+    <div>
+      <h3>Formatted sheets</h3>
+      <p class="small muted">Headers are styled, columns sized, dates formatted, and filters enabled on every data sheet.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -25,7 +25,17 @@ async def security_middleware(request,call_next):
     if request.method not in SAFE_METHODS and request.url.path not in CSRF_EXEMPT:
         submitted=request.headers.get('x-csrf-token')
         if not submitted:
-            try:submitted=(await request.form()).get('_csrf')
+            # Read/cache the raw body instead of calling request.form(): in a
+            # BaseHTTPMiddleware, form() consumes the stream and downstream
+            # routes receive an empty body (every form POST becomes a 422).
+            try:
+                raw=await request.body()
+                content_type=request.headers.get('content-type','')
+                if 'application/x-www-form-urlencoded' in content_type:
+                    from urllib.parse import parse_qs
+                    submitted=(parse_qs(raw.decode('utf-8')).get('_csrf') or [None])[0]
+                elif 'multipart/form-data' in content_type:
+                    submitted=(await request.form()).get('_csrf')
             except Exception:submitted=None
         if not submitted or not verify_csrf(submitted,session_id):
             return JSONResponse({'error':'CSRF validation failed'},status_code=403)
