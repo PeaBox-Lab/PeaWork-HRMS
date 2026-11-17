@@ -1,5 +1,6 @@
-import importlib.util, os, sys
-from pathlib import Path
+import importlib.util
+import os
+import sys
 checks=[]
 def check(name,ok,detail): checks.append((name,ok,detail))
 check('PEAWORK_SECRET',len(os.getenv('PEAWORK_SECRET',''))>=32 and os.getenv('PEAWORK_SECRET')!='dev-only-change-me','must be a non-default value of at least 32 characters')

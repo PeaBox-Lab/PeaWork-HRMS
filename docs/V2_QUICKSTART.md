@@ -12,7 +12,7 @@ implementation but is not the target for new production deployments.
   throttling, CSRF double-submit protection and forced password rotation
 - Employee master data, departments, positions, reporting lines and history
 - Leave types, balances, requests, approvals, cancellation and team calendar
-- Private document upload/download with type/size validation and audit trail
+- Private document upload/download with type/size validation, audit trail and acknowledgements
 - Append-only audit log, role-based access control and object-level checks
 - Admin screens for users, organisation settings and audit review
 - Sample data generator (100-employee hierarchy) with a one-click clean/reset

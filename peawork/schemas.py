@@ -13,7 +13,9 @@ from .domain import (
     EmployeeStatus,
     EmploymentType,
     LeaveStatus,
+    PayComponentType,
     Role,
+    StatutoryRuleType,
 )
 
 T = TypeVar("T")
@@ -247,6 +249,20 @@ class DocumentOut(ORMModel):
     size_bytes: int
     expires_on: date | None
     created_at: datetime
+    acknowledged_at: datetime | None = None
+    acknowledged_by: UUID | None = None
+
+
+class DocumentAcknowledgementOut(ORMModel):
+    id: UUID
+    document_id: UUID
+    acknowledger_id: UUID
+    acknowledger_employee_id: UUID | None
+    acknowledged_at: datetime
+    created_at: datetime
+    ip: str | None = None
+    user_agent: str | None = None
+    comment: str | None = None
 
 
 class AuditEventOut(ORMModel):
@@ -278,3 +294,154 @@ class HealthOut(BaseModel):
     environment: str
     database: str
     organization: str | None = None
+
+
+class PayslipOut(ORMModel):
+    id: UUID
+    run_id: UUID
+    employee_id: UUID
+    gross_pay: Decimal
+    total_deductions: Decimal
+    net_pay: Decimal
+    bank_account_last4: str | None
+    paid_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PayslipLineOut(BaseModel):
+    id: UUID
+    payslip_id: UUID
+    component_id: UUID | None
+    component_name: str
+    component_type: PayComponentType
+    amount: Decimal
+    quantity: Decimal | None
+    unit: str | None
+
+
+class CompensationOut(ORMModel):
+    id: UUID
+    base_salary: Decimal
+    currency: str
+    payroll_frequency: str
+    tax_regime: str
+    pay_scale: str | None
+    grade: str | None
+    effective_from: date
+    effective_to: date | None
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CompensationComponentOut(BaseModel):
+    id: UUID
+    component_name: str
+    component_type: PayComponentType
+    amount: Decimal
+    effective_from: date
+
+
+class PayrollRunOut(ORMModel):
+    id: UUID
+    name: str
+    period_start: date
+    period_end: date
+    pay_date: date | None
+    frequency: str
+    currency: str
+    status: str
+    total_gross: Decimal
+    total_net: Decimal
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BankAccountOut(ORMModel):
+    id: UUID
+    account_type: str
+    bank_name: str
+    account_holder: str
+    account_number_masked: str
+    ifsc: str | None
+    swift: str | None
+    is_primary: bool
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class BenefitPlanOut(ORMModel):
+    id: UUID
+    name: str
+    code: str
+    benefit_type: str
+    provider: str | None
+    employer_contribution: Decimal
+    employee_contribution: Decimal
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmployeeBenefitOut(ORMModel):
+    id: UUID
+    plan: BenefitPlanOut
+    enrolled_on: date
+    coverage_amount: Decimal | None
+    status: str
+    ends_on: date | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LegalEntityOut(ORMModel):
+    id: UUID
+    name: str
+    code: str
+    country_code: str
+    currency: str
+    tax_id: str | None
+    address: str | None
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class StatutoryRuleVersionOut(ORMModel):
+    id: UUID
+    org_id: UUID
+    rule_type: StatutoryRuleType
+    country_code: str
+    state_code: str | None
+    effective_from: date
+    effective_to: date | None
+    version: int
+    rates: dict
+    active: bool
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class StatutoryRuleVersionCreate(BaseModel):
+    rule_type: StatutoryRuleType
+    country_code: str = Field(default="IN", max_length=2)
+    state_code: str | None = Field(default=None, max_length=2)
+    effective_from: date
+    effective_to: date | None = None
+    version: int = Field(default=1, ge=1)
+    rates: dict
+    active: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class StatutoryRuleVersionUpdate(BaseModel):
+    effective_from: date | None = None
+    effective_to: date | None = None
+    version: int | None = Field(default=None, ge=1)
+    rates: dict | None = None
+    active: bool | None = None
+    notes: str | None = Field(default=None, max_length=2000)

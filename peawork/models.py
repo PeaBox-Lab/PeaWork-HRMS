@@ -29,12 +29,19 @@ from .db import Base
 from .domain import (
     AttendanceStatus,
     AuditAction,
+    BankAccountType,
+    BenefitType,
     DocumentCategory,
     EmployeeStatus,
     EmploymentType,
     LeaveStatus,
     NotificationKind,
+    PayComponentType,
+    PayrollFrequency,
+    PayrollStatus,
     Role,
+    StatutoryRuleType,
+    TaxRegime,
 )
 
 
@@ -452,8 +459,43 @@ class Document(TimestampMixin, Base):
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_on: Mapped[date | None] = mapped_column(Date)
     uploaded_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), index=True)
 
     employee: Mapped[Employee | None] = relationship(back_populates="documents", lazy="selectin")
+    acknowledgements: Mapped[list["DocumentAcknowledgement"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class DocumentAcknowledgement(Base):
+    __tablename__ = "document_acknowledgements"
+    __table_args__ = (
+        UniqueConstraint("document_id", "acknowledger_id", name="uq_document_acknowledgements_doc_user"),
+        Index("ix_document_acknowledgements_org_created", "org_id", "acknowledged_at"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    acknowledger_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=False, index=True
+    )
+    acknowledger_employee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(255))
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    document: Mapped["Document"] = relationship(back_populates="acknowledgements", lazy="selectin")
+    acknowledger: Mapped["User | None"] = relationship(foreign_keys=[acknowledger_id], lazy="selectin")
 
 
 class AuditEvent(Base):
@@ -495,3 +537,357 @@ class Notification(Base):
     link: Mapped[str | None] = mapped_column(String(255))
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class PayComponent(TimestampMixin, Base):
+    """Org-level library of salary components (Basic, HRA, PF, ...)."""
+
+    __tablename__ = "pay_components"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_pay_components_org_code"),
+        Index("ix_pay_components_org_type", "org_id", "component_type"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    component_type: Mapped[PayComponentType] = mapped_column(
+        enum_col(PayComponentType), nullable=False
+    )
+    is_taxable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_statutory: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    default_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class Compensation(TimestampMixin, Base):
+    """Current compensation summary for an employee."""
+
+    __tablename__ = "compensations"
+    __table_args__ = (
+        UniqueConstraint("employee_id", name="uq_compensations_employee"),
+        Index("ix_compensations_org_currency", "org_id", "currency"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    base_salary: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    payroll_frequency: Mapped[PayrollFrequency] = mapped_column(
+        enum_col(PayrollFrequency), default=PayrollFrequency.MONTHLY, nullable=False
+    )
+    tax_regime: Mapped[TaxRegime] = mapped_column(
+        enum_col(TaxRegime), default=TaxRegime.INDIA_NEW, nullable=False
+    )
+    pay_scale: Mapped[str | None] = mapped_column(String(40))
+    grade: Mapped[str | None] = mapped_column(String(24))
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+
+
+class CompensationComponent(Base):
+    """Component-level breakdown of a compensation record."""
+
+    __tablename__ = "compensation_components"
+    __table_args__ = (
+        UniqueConstraint("compensation_id", "component_id", name="uq_comp_component_pair"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    compensation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("compensations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    component_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pay_components.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+
+    component: Mapped[PayComponent] = relationship(lazy="selectin")
+
+
+class PayrollRun(TimestampMixin, Base):
+    """A batch payroll run for a pay period."""
+
+    __tablename__ = "payroll_runs"
+    __table_args__ = (
+        UniqueConstraint("org_id", "period_start", "period_end", name="uq_payroll_runs_period"),
+        Index("ix_payroll_runs_org_status", "org_id", "status"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    pay_date: Mapped[date | None] = mapped_column(Date)
+    frequency: Mapped[PayrollFrequency] = mapped_column(
+        enum_col(PayrollFrequency), default=PayrollFrequency.MONTHLY, nullable=False
+    )
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    status: Mapped[PayrollStatus] = mapped_column(
+        enum_col(PayrollStatus), default=PayrollStatus.DRAFT, nullable=False
+    )
+    total_gross: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), default=Decimal("0"), nullable=False
+    )
+    total_net: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), default=Decimal("0"), nullable=False
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    frozen: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StatutoryRuleVersion(TimestampMixin, Base):
+    """Statutory rule version with effective dates and validation gates."""
+
+    __tablename__ = "statutory_rule_versions"
+    __table_args__ = (
+        UniqueConstraint("org_id", "rule_type", "country_code", "state_code", "version", name="uq_statutory_rule_version"),
+        Index("ix_statutory_rule_org_type_country", "org_id", "rule_type", "country_code", "state_code"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    rule_type: Mapped[StatutoryRuleType] = mapped_column(
+        enum_col(StatutoryRuleType), nullable=False
+    )
+    country_code: Mapped[str] = mapped_column(String(2), default="IN", nullable=False)
+    state_code: Mapped[str | None] = mapped_column(String(2))
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    rates: Mapped[dict] = mapped_column(JSON, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class Payslip(TimestampMixin, Base):
+    """One employee's result inside a payroll run."""
+
+    __tablename__ = "payslips"
+    __table_args__ = (
+        UniqueConstraint("run_id", "employee_id", name="uq_payslips_run_employee"),
+        Index("ix_payslips_org_employee", "org_id", "employee_id"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gross_pay: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    total_deductions: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
+    net_pay: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    bank_account_last4: Mapped[str | None] = mapped_column(String(4))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    run: Mapped[PayrollRun] = relationship(lazy="selectin")
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+    lines: Mapped[list["PayslipLine"]] = relationship(
+        back_populates="payslip", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class PayslipLine(Base):
+    """A single earning/deduction line on a payslip."""
+
+    __tablename__ = "payslip_lines"
+    __table_args__ = (Index("ix_payslip_lines_payslip", "payslip_id"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    payslip_id: Mapped[UUID] = mapped_column(
+        ForeignKey("payslips.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    component_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pay_components.id", ondelete="SET NULL")
+    )
+    component_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    component_type: Mapped[PayComponentType] = mapped_column(
+        enum_col(PayComponentType), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    unit: Mapped[str | None] = mapped_column(String(24))
+
+    payslip: Mapped[Payslip] = relationship(back_populates="lines", lazy="selectin")
+
+
+class BankAccount(TimestampMixin, Base):
+    """Employee bank account for salary disbursement."""
+
+    __tablename__ = "bank_accounts"
+    __table_args__ = (Index("ix_bank_accounts_org_employee", "org_id", "employee_id"),)
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    account_type: Mapped[BankAccountType] = mapped_column(
+        enum_col(BankAccountType), default=BankAccountType.SALARY, nullable=False
+    )
+    bank_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    branch: Mapped[str | None] = mapped_column(String(120))
+    account_holder: Mapped[str] = mapped_column(String(160), nullable=False)
+    account_number_masked: Mapped[str] = mapped_column(String(32), nullable=False)
+    ifsc: Mapped[str | None] = mapped_column(String(24))
+    swift: Mapped[str | None] = mapped_column(String(24))
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+
+
+class BenefitPlan(TimestampMixin, Base):
+    """Org-level benefit plan catalog."""
+
+    __tablename__ = "benefit_plans"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_benefit_plans_org_code"),
+        Index("ix_benefit_plans_org_type", "org_id", "benefit_type"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    benefit_type: Mapped[BenefitType] = mapped_column(
+        enum_col(BenefitType), nullable=False
+    )
+    provider: Mapped[str | None] = mapped_column(String(120))
+    employer_contribution: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
+    employee_contribution: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class EmployeeBenefit(TimestampMixin, Base):
+    """An employee's enrollment in a benefit plan."""
+
+    __tablename__ = "employee_benefits"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "plan_id", name="uq_emp_benefits_employee_plan"),
+        Index("ix_employee_benefits_org_status", "org_id", "status"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("benefit_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    enrolled_on: Mapped[date] = mapped_column(Date, nullable=False)
+    coverage_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
+    ends_on: Mapped[date | None] = mapped_column(Date)
+
+    plan: Mapped[BenefitPlan] = relationship(lazy="selectin")
+
+
+class LegalEntity(TimestampMixin, Base):
+    """Legal entities / subsidiaries the organization operates under."""
+
+    __tablename__ = "legal_entities"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_legal_entities_org_code"),
+        Index("ix_legal_entities_org_country", "org_id", "country_code"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    tax_id: Mapped[str | None] = mapped_column(String(64))
+    address: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+__all__ = [
+    "AttendanceRecord",
+    "AuditEvent",
+    "AttendanceStatus",
+    "Document",
+    "DocumentAcknowledgement",
+    "Department",
+    "DocumentCategory",
+    "Employee",
+    "EmployeeHistory",
+    "EmploymentType",
+    "EmployeeStatus",
+    "Holiday",
+    "LeaveType",
+    "LeaveBalance",
+    "LeaveRequest",
+    "LeaveStatus",
+    "Notification",
+    "NotificationKind",
+    "Organization",
+    "PayComponent",
+    "Compensation",
+    "CompensationComponent",
+    "PayrollRun",
+    "Payslip",
+    "PayslipLine",
+    "BankAccount",
+    "BenefitPlan",
+    "EmployeeBenefit",
+    "LegalEntity",
+    "StatutoryRuleVersion",
+    "Position",
+    "Shift",
+    "User",
+    "Role",
+    "AuditAction",
+    "PayComponentType",
+    "PayrollFrequency",
+    "PayrollStatus",
+    "StatutoryRuleType",
+    "TaxRegime",
+    "BenefitType",
+    "BankAccountType",
+]

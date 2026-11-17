@@ -60,6 +60,10 @@ def login_submit(
     raw_token, csrf_token, _ = create_session(
         db, user=user, ip=ip, user_agent=request.headers.get("user-agent")
     )
+    # Commit now so the session is durable before the client follows the
+    # redirect — the dependency-teardown commit happens after the response is
+    # sent, which raced with the next request's middleware session lookup.
+    db.commit()
     response = RedirectResponse(safe_next(next), status_code=303)
     set_auth_cookies(
         response, settings, session_token=raw_token, csrf_token=csrf_token

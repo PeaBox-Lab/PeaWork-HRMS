@@ -1,4 +1,6 @@
-import os,sqlite3,sys
+import os
+import sqlite3
+import sys
 from pathlib import Path
 root=Path(__file__).resolve().parent.parent;db=Path(os.getenv('PEAWORK_CONTROL_DATABASE',root/'data'/'control.db'))
 if not db.exists():print('FAIL control database not found');sys.exit(1)

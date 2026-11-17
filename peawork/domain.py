@@ -85,3 +85,63 @@ class NotificationKind(StrEnum):
     ACTION = "action"
     APPROVAL = "approval"
     SYSTEM = "system"
+
+
+class PayrollFrequency(StrEnum):
+    MONTHLY = "monthly"
+    SEMI_MONTHLY = "semi_monthly"
+    BI_WEEKLY = "bi_weekly"
+    WEEKLY = "weekly"
+    DAILY = "daily"
+
+
+class PayrollStatus(StrEnum):
+    DRAFT = "draft"
+    PROCESSING = "processing"
+    REVIEW = "review"
+    APPROVED = "approved"
+    FINALIZED = "finalized"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+
+
+class PayComponentType(StrEnum):
+    EARNING = "earning"
+    DEDUCTION = "deduction"
+    EMPLOYER_CONTRIBUTION = "employer_contribution"
+    TAX = "tax"
+
+
+class TaxRegime(StrEnum):
+    INDIA_OLD = "india_old"
+    INDIA_NEW = "india_new"
+    US_FEDERAL = "us_federal"
+    UK_PAYE = "uk_paye"
+    GENERIC = "generic"
+
+
+class BenefitType(StrEnum):
+    HEALTH_INSURANCE = "health_insurance"
+    LIFE_INSURANCE = "life_insurance"
+    RETIREMENT_PLAN = "retirement_plan"
+    STOCK_OPTIONS = "stock_options"
+    WELLNESS = "wellness"
+    TRANSPORT = "transport"
+    MEAL = "meal"
+    CHILDCARE = "childcare"
+    EDUCATION = "education"
+    OTHER = "other"
+
+
+class BankAccountType(StrEnum):
+    SAVINGS = "savings"
+    CHECKING = "checking"
+    CURRENT = "current"
+    SALARY = "salary"
+
+
+class StatutoryRuleType(StrEnum):
+    PF = "pf"
+    ESI = "esi"
+    PT = "pt"
+    TDS = "tds"

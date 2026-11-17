@@ -16,7 +16,14 @@ from ..domain import AuditAction, DocumentCategory, EmployeeStatus, EmploymentTy
 from ..models import Department, Employee, LeaveRequest, Position, User
 from ..schemas import EmployeeCreate, EmployeeUpdate
 from ..services import audit, policy
-from ..services.documents import delete_document, file_path, get_document, list_documents, save_document
+from ..services.documents import (
+    acknowledge_document,
+    delete_document,
+    file_path,
+    get_document,
+    list_documents,
+    save_document,
+)
 from ..services.employees import (
     create_employee,
     get_employee_for,
@@ -461,6 +468,22 @@ def document_download(
         filename=document.filename,
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post("/documents/{document_id}/acknowledge")
+def document_acknowledge(
+    document_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    try:
+        acknowledge_document(db, actor=user, document_id=document_id, request=request)
+    except DomainError as exc:
+        return RedirectResponse(
+            f"/documents?error={quote(exc.message)}", status_code=303
+        )
+    return RedirectResponse("/documents?msg=Document+acknowledged", status_code=303)
 
 
 @router.post("/documents/{document_id}/delete")

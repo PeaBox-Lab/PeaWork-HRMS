@@ -1,4 +1,9 @@
-import argparse,concurrent.futures,json,statistics,time,urllib.request
+import argparse
+import concurrent.futures
+import json
+import statistics
+import time
+import urllib.request
 
 def run(url,concurrency=10,request_count=100,timeout=10):
  def one(_):

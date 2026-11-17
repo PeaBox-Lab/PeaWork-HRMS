@@ -1,4 +1,5 @@
-import os, tempfile  
+import os
+import tempfile  
 from fastapi.testclient import TestClient  
 fd, path = tempfile.mkstemp(suffix='.db')  
 os.close(fd)  
@@ -207,7 +208,7 @@ def test_payroll_apis_require_authentication():
 
 
 def test_cloud_tenant_isolation_and_controls():
-    from app.cloud_control import init_control_db,control_conn,issue_scim_token
+    from app.cloud_control import init_control_db,control_conn
     from app.db import set_tenant,reset_tenant
     from app.main import tenant_employee_limit
     init_control_db()

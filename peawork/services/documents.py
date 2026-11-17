@@ -13,9 +13,10 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..domain import AuditAction, DocumentCategory
-from ..models import Document, Employee, User
+from ..models import Document, DocumentAcknowledgement, Employee, User
+from ..security import utcnow
 from . import audit, policy
-from .errors import ForbiddenError, NotFoundError, ValidationError
+from .errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 
 EXTENSION_TYPES = {
     ".pdf": "application/pdf",
@@ -191,7 +192,9 @@ def file_path(document: Document) -> Path:
     return path
 
 
-def delete_document(db: Session, *, actor: User, document_id: UUID, request=None) -> None:
+def delete_document(
+    db: Session, *, actor: User, document_id: UUID, request=None
+) -> None:
     if actor.role.value not in {"admin", "hr"}:
         raise ForbiddenError("Only HR or administrators may delete documents")
     document = get_document(db, actor=actor, document_id=document_id)
@@ -214,10 +217,176 @@ def delete_document(db: Session, *, actor: User, document_id: UUID, request=None
         pass
 
 
+def acknowledge_document(
+    db: Session,
+    *,
+    actor: User,
+    document_id: UUID,
+    request=None,
+) -> DocumentAcknowledgement:
+    """Record that the acting user has read and acknowledged a document.
+
+    Employees acknowledge their own documents. HR/admin may acknowledge on
+    behalf of the employee. The document summary columns are updated and an
+    audit event is recorded.
+
+    Unique constraint: one acknowledgement per document per employee
+    (regardless of who acknowledges).
+    """
+    document = db.get(Document, document_id)
+    if document is None or document.org_id != actor.org_id:
+        raise NotFoundError("Document not found")
+
+    # Acknowledgement actor must be able to view the document.
+    if not policy.can_view_document(actor, document):
+        raise ForbiddenError("You do not have access to this document")
+
+    # Determine the employee this acknowledgement is for.
+    # If the actor is the document's employee, it's self-acknowledgement.
+    # If actor is HR/admin, it's on-behalf of the document's employee.
+    doc_employee_id = document.employee_id
+    is_actor_employee = actor.employee_id == doc_employee_id
+
+    # Check for existing acknowledgement by any user for this document+employee combo.
+    if is_actor_employee:
+        # Employee: check if they already acknowledged their own document
+        existing = db.scalar(
+            select(DocumentAcknowledgement).where(
+                DocumentAcknowledgement.document_id == document_id,
+                DocumentAcknowledgement.acknowledger_employee_id == actor.employee_id,
+            )
+        )
+    else:
+        # HR/admin: check if any acknowledgement exists for this document+employee
+        existing = db.scalar(
+            select(DocumentAcknowledgement).where(
+                DocumentAcknowledgement.document_id == document_id,
+                DocumentAcknowledgement.acknowledger_employee_id == doc_employee_id,
+            )
+        )
+
+    if existing is not None:
+        raise ConflictError("Document already acknowledged")
+
+    # Employees acknowledge for themselves; HR/admin may acknowledge on behalf
+    # of the person the document belongs to.
+    if doc_employee_id and actor.employee_id and actor.employee_id != doc_employee_id:
+        if actor.role.value not in {"admin", "hr"}:
+            raise ForbiddenError("You may only acknowledge documents that belong to you")
+
+    # Determine the acknowledger_employee_id to store.
+    # If actor is the document's employee, store their employee_id.
+    # If actor is HR/admin, store the document's employee_id.
+    if is_actor_employee:
+        acknowledger_employee_id = actor.employee_id
+    else:
+        acknowledger_employee_id = doc_employee_id
+
+    acknowledgment = DocumentAcknowledgement(
+        org_id=document.org_id,
+        document_id=document_id,
+        acknowledger_id=actor.id,
+        acknowledger_employee_id=acknowledger_employee_id,
+        acknowledged_at=utcnow(),
+        ip=getattr(request.client, "host", None) if request else None,
+        user_agent=(request.headers.get("user-agent") or None) if request else None,
+    )
+    db.add(acknowledgment)
+
+    document.acknowledged_at = acknowledgment.acknowledged_at
+    document.acknowledged_by = actor.id
+
+    db.flush()
+    audit.record(
+        db,
+        actor=actor,
+        action=AuditAction.VIEW,
+        entity_type="document_acknowledgement",
+        entity_id=document_id,
+        details={
+            "employee_id": str(document.employee_id),
+            "acknowledged": True,
+        },
+        request=request,
+        org_id=document.org_id,
+    )
+    db.flush()
+    return acknowledgment
+
+
+def list_acknowledgements(
+    db: Session,
+    *,
+    actor: User,
+    document_id: UUID | None = None,
+    employee_id: UUID | None = None,
+) -> list[DocumentAcknowledgement]:
+    """List acknowledgements.
+
+    Employees see only their own acknowledgements; HR/admin see everything.
+    """
+    if not policy.is_privileged_reader(actor):
+        if actor.employee_id is None:
+            return []
+        if document_id:
+            document = db.get(Document, document_id)
+            if document is None or document.employee_id != actor.employee_id:
+                raise ForbiddenError("You do not have access to this document's acknowledgements")
+            employee_id = actor.employee_id
+        else:
+            employee_id = actor.employee_id
+
+    stmt = select(DocumentAcknowledgement).where(DocumentAcknowledgement.org_id == actor.org_id)
+    if document_id:
+        stmt = stmt.where(DocumentAcknowledgement.document_id == document_id)
+    if employee_id:
+        stmt = stmt.where(DocumentAcknowledgement.acknowledger_employee_id == employee_id)
+    return list(
+        db.scalars(stmt.order_by(DocumentAcknowledgement.acknowledged_at.desc())).all()
+    )
+
+
+def get_acknowledgement(
+    db: Session,
+    *,
+    actor: User,
+    document_id: UUID,
+) -> DocumentAcknowledgement | None:
+    """Get the acknowledgement for a document, scoped by visibility."""
+    stmt = select(DocumentAcknowledgement).where(
+        DocumentAcknowledgement.document_id == document_id,
+        DocumentAcknowledgement.org_id == actor.org_id,
+    )
+    if not policy.is_privileged_reader(actor):
+        if actor.employee_id is None:
+            return None
+        # Employee can see acknowledgements for documents that belong to them.
+        document = db.get(Document, document_id)
+        if document is None or document.employee_id != actor.employee_id:
+            raise ForbiddenError("You do not have access to this document's acknowledgements")
+    return db.scalar(stmt)
+
+
+def document_has_been_acknowledged(db: Session, document_id: UUID) -> bool:
+    """Check if a document has at least one acknowledgement."""
+    return (
+        db.scalar(
+            select(DocumentAcknowledgement.id).where(
+                DocumentAcknowledgement.document_id == document_id
+            )
+        )
+        is not None
+    )
+
+
 __all__ = [
+    "acknowledge_document",
     "delete_document",
+    "document_has_been_acknowledged",
     "file_path",
+    "get_acknowledgement",
     "get_document",
+    "list_acknowledgements",
     "list_documents",
     "save_document",
 ]

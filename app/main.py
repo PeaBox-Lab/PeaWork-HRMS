@@ -1,11 +1,17 @@
-from fastapi import FastAPI,Request,Form,UploadFile,File,HTTPException,Depends    
+from fastapi import FastAPI,Request,Form,UploadFile,File,HTTPException    
 from fastapi.responses import HTMLResponse,RedirectResponse,StreamingResponse,JSONResponse    
 from fastapi.templating import Jinja2Templates    
 from fastapi.staticfiles import StaticFiles    
 from pathlib import Path    
 from datetime import date,datetime,timedelta
 from decimal import Decimal, ROUND_HALF_UP    
-import csv,io,json,os,shutil,secrets,sqlite3,time    
+import csv
+import io
+import json
+import os
+import secrets
+import sqlite3
+import time    
 from .db import conn,init_db,set_tenant,reset_tenant,current_tenant,tenant_db_path    
 from .security import hash_password,verify_password,token,untoken,csrf_token,verify_csrf
 from .cloud_control import control_conn,init_control_db,clean_slug,issue_scim_token,hash_token,cloud_audit,resolve_tenant
@@ -242,7 +248,7 @@ def leave(request:Request):
     return page(request,'leave.html',requests=rows,types=q('SELECT * FROM leave_types WHERE active=1'),employees=q("SELECT id,first_name||' '||last_name name FROM employees WHERE status='Active'"),holidays=q('SELECT * FROM holidays ORDER BY holiday_date'))    
 @app.post('/leave/request')    
 def leave_request(request:Request,employee_id:int=Form(...),leave_type_id:int=Form(...),start_date:str=Form(...),end_date:str=Form(...),days:float=Form(...),reason:str=Form('')):    
-    u=require(request);     
+    u=require(request)     
     if u['role']=='employee' and employee_id!=u['employee_id']: raise HTTPException(403)    
     i=execq('INSERT INTO leave_requests(employee_id,leave_type_id,start_date,end_date,days,reason) VALUES(?,?,?,?,?,?)',(employee_id,leave_type_id,start_date,end_date,days,reason));audit(u['username'],'CREATE','leave_request',i,reason);return RedirectResponse('/leave',303)    
 @app.post('/leave/{lid}/decision')    

@@ -10,6 +10,7 @@
   </div>
   <div class="actions">
     <a class="btn btn--ghost" href="/employees">Open people directory</a>
+    <a class="btn btn--ghost btn--sm" href="/i18n?lang={{ 'hi' if locale == 'en' else 'en' }}" title="Switch language">{{ 'हिंदी' if locale == 'en' else 'English' }}</a>
   </div>
 </div>
 
@@ -23,7 +24,7 @@
     <div class="table-wrap">
       <table class="data">
         <thead>
-          <tr><th>Title</th><th>Employee</th><th>Category</th><th>File</th><th>Size</th><th>Expires</th><th>Uploaded</th><th></th></tr>
+          <tr><th>Title</th><th>Employee</th><th>Category</th><th>File</th><th>Size</th><th>Expires</th><th>Acknowledged</th><th>Uploaded</th><th></th></tr>
         </thead>
         <tbody>
         {% for document in documents %}
@@ -41,9 +42,29 @@
             <td class="small">{{ document.filename }}</td>
             <td class="nowrap">{{ (document.size_bytes / 1024)|round(1) }} KB</td>
             <td class="nowrap">{{ document.expires_on|date if document.expires_on else '—' }}</td>
+            <td class="nowrap">
+              {% if document.acknowledged_at %}
+                <span class="badge badge--ok">Yes · {{ document.acknowledged_at|date }}</span>
+              {% else %}
+                <span class="badge badge--warn">Pending</span>
+              {% endif %}
+            </td>
             <td class="nowrap">{{ document.created_at|date }}</td>
             <td class="right nowrap">
               <a class="btn btn--ghost btn--sm" href="/documents/{{ document.id }}/download">Download</a>
+              {% if not document.acknowledged_at %}
+                {% if document.employee and document.employee.id == user.employee_id %}
+                <form method="post" action="/documents/{{ document.id }}/acknowledge" class="inline-form" data-confirm="Confirm you have read this document?">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="btn btn--ok btn--sm" type="submit">Acknowledge</button>
+                </form>
+                {% elif document.employee and user.role in ["admin", "hr"] %}
+                <form method="post" action="/documents/{{ document.id }}/acknowledge" class="inline-form" data-confirm="Acknowledge on behalf of {{ document.employee.full_name }}?">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="btn btn--ok btn--sm" type="submit">Acknowledge for employee</button>
+                </form>
+                {% endif %}
+              {% endif %}
               {% if can_delete %}
                 <form method="post" action="/documents/{{ document.id }}/delete" class="inline-form" data-confirm="Delete this document permanently?">
                   <input type="hidden" name="_csrf" value="{{ csrf_token }}">

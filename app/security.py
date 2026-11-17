@@ -1,4 +1,10 @@
-import base64,hashlib,hmac,json,os,secrets,time
+import base64
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import time
 SECRET=os.getenv('PEAWORK_SECRET','dev-only-change-me').encode()
 PASSWORD_ITERATIONS=int(os.getenv('PEAWORK_PASSWORD_ITERATIONS','600000'))
 

@@ -31,6 +31,23 @@ from .forms import parse_uuid, validation_message
 
 router = APIRouter(dependencies=[Depends(csrf_guard)])
 
+
+@router.get("/i18n")
+def i18n_switch(request: Request, lang: str = ""):
+    """Set the locale cookie and redirect back to the referring page."""
+    from ..i18n import SUPPORTED
+
+    if lang in SUPPORTED:
+        response = RedirectResponse(
+            url=request.headers.get("referer", "/"), status_code=303
+        )
+        response.set_cookie(
+            key="pw_lang", value=lang, httponly=False, samesite="lax", max_age=60 * 60 * 24 * 365
+        )
+        return response
+    return RedirectResponse(url=request.headers.get("referer", "/"), status_code=303)
+
+
 AUDIT_LIMIT = 50
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
