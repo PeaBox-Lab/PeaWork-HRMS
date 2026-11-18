@@ -20,6 +20,7 @@ from .api import v1 as api_v1
 from .config import get_settings
 from .db import create_all, get_engine, session_scope
 from .deps import LoginRequired, PasswordChangeRequired, wants_html
+from .ha import get_ha_manager
 from .middleware import RequestContextMiddleware
 from .services.bootstrap import bootstrap, get_organization
 from .services.errors import DomainError
@@ -77,13 +78,26 @@ async def lifespan(app: FastAPI):
     except SQLAlchemyError as exc:
         raise RuntimeError("Database is not reachable. Check PEAWORK_DATABASE_URL.") from exc
 
+    # Register HA nodes (from config or defaults)
+    ha_manager = get_ha_manager()
+    if settings.ha_enabled and settings.ha_nodes:
+        for node_id in settings.ha_nodes:
+            await ha_manager.register_node(node_id)
+
     log.info(
         "PeaWork %s started (env=%s, db=%s)",
         __version__,
         settings.env,
         settings.database_url.split("@")[-1],
     )
+
+    # Start a background readiness monitor
+    asyncio.create_task(ha_manager._monitor_readiness())
+
     yield
+
+
+def _problem(status: int, title: str, detail: str) -> JSONResponse:
 
 
 def create_app() -> FastAPI:
@@ -103,6 +117,10 @@ def create_app() -> FastAPI:
     if settings.allowed_host_list != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_host_list)
     app.add_middleware(RequestContextMiddleware)
+    if settings.ha_enabled:
+        from .ha import HAMiddleware
+
+        app.add_middleware(HAMiddleware)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -228,6 +246,28 @@ def _install_ops_routes(app: FastAPI) -> None:
             return JSONResponse(
                 {"status": "not_ready", "database": "unavailable"}, status_code=503
             )
+
+    # HA routes (only if ha_enabled)
+    @app.get("/health/ha", tags=["ops"])
+    def health_ha():
+        manager = get_ha_manager()
+        return manager.readiness_status()
+
+    @app.post("/health/ha/register", tags=["ops"])
+    def ha_register(node_id: str):
+        import asyncio
+
+        manager = get_ha_manager()
+        asyncio.create_task(manager.register_node(node_id))
+        return {"detail": "node registered"}
+
+    @app.post("/health/ha/heartbeat/{node_id}", tags=["ops"])
+    def ha_heartbeat(node_id: str):
+        import asyncio
+
+        manager = get_ha_manager()
+        asyncio.create_task(manager.heartbeat(node_id))
+        return {"detail": "heartbeat recorded"}
 
     @app.get("/metrics", tags=["ops"])
     def metrics(request: Request):

@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     otel_trace_id: str | None = None
     otel_trace_flags: int = 1  # bit flags for trace processing
 
+    # R5 — High Availability
+    ha_enabled: bool = False
+    ha_mode: str | None = None  # "active-passive" or "active-active"
+    ha_nodes: list[str] = []  # list of instance IDs or hostnames
+    ha_heartbeat_interval: int = 30  # seconds between health checks
+    ha_max_unhealthy_nodes: int = 1  # max nodes allowed to be unhealthy
+    ha_backup_enabled: bool = False  # enable automated backup during HA
+
     @property
     def is_production(self) -> bool:
         return self.env.lower() in {"production", "prod"}
