@@ -234,6 +234,84 @@ def cleanup_old_wal_files(retention_days: int | None = None) -> int:
     return deleted
 
 
+def pitr_recover(
+    backup_filename: str,
+    target_time: str | None = None,
+    output_dir: str | None = None,
+) -> dict[str, Any]:
+    """Prepare PITR recovery configuration.
+
+    This function creates a recovery configuration that can be used to restore
+    a PostgreSQL database to a specific point in time.
+
+    Steps:
+    1. Restore the base backup from backup_filename
+    2. Create recovery.conf / recovery.signal with target time
+    3. Start PostgreSQL which will replay WAL files up to target_time
+
+    Note: This requires PostgreSQL with archive_mode=on and a configured
+    archive_command. This is a helper that prepares the recovery files;
+    actual recovery happens when PostgreSQL restarts.
+    """
+    settings = get_settings()
+    if not settings.pitr_enabled:
+        raise RuntimeError("PITR is not enabled. Set PEAWORK_PITR_ENABLED=true")
+
+    target = target_time or settings.pitr_recovery_target_time
+    if not target:
+        raise ValueError("target_time is required for PITR recovery")
+
+    wal_dir = _wal_archive_dir()
+    if not wal_dir or not wal_dir.exists():
+        raise FileNotFoundError(
+            f"WAL archive directory not found: {wal_dir}. "
+            "Ensure archive_mode is on and archive_command is configured."
+        )
+
+    # Verify the base backup exists
+    backup_path = _backup_dir() / backup_filename
+    if not backup_path.exists():
+        raise FileNotFoundError(f"Base backup not found: {backup_filename}")
+
+    # Create recovery configuration (for PostgreSQL 12+: recovery.signal + settings)
+    recovery_dir = Path(output_dir) if output_dir else Path("./data/recovery")
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+
+    recovery_conf = recovery_dir / "postgresql.auto.conf.recovery"
+    recovery_conf.write_text(
+        f"# PITR recovery configuration\n"
+        f"# Generated at {_now_iso()}\n"
+        f"recovery_target_time = '{target}'\n"
+        f"restore_command = 'cp {wal_dir}/%f %p'\n"
+        f"recovery_target_action = 'promote'\n"
+    )
+
+    # Create a marker file that PostgreSQL will detect
+    signal_file = recovery_dir / "recovery.signal"
+    if not signal_file.exists():
+        signal_file.write_text("")
+
+    return {
+        "status": "prepared",
+        "backup_file": backup_filename,
+        "target_time": target,
+        "wal_archive_dir": str(wal_dir),
+        "recovery_dir": str(recovery_dir),
+        "recovery_config": recovery_conf.name,
+        "signal_file": signal_file.name,
+        "wal_files_available": len(list(wal_dir.glob("*.wal"))),
+        "next_steps": [
+            f"1. Stop PostgreSQL: systemctl stop postgresql",
+            f"2. Restore base backup: pg_restore -d {recovery_dir} {backup_path}",
+            f"3. Copy {recovery_conf.name} to PG_DATA/postgresql.auto.conf",
+            f"4. Copy {signal_file.name} to PG_DATA/recovery.signal",
+            f"5. Start PostgreSQL: systemctl start postgresql",
+            f"6. Verify recovery: SELECT pg_is_in_recovery();",
+        ],
+        "timestamp": _now_iso(),
+    }
+
+
 def sha256_of_file(filename: str) -> str:
     """Return the SHA-256 checksum for a backup file."""
     return _sha256(_backup_dir() / filename)
@@ -245,6 +323,7 @@ __all__ = [
     "restore_backup",
     "delete_backup",
     "pitr_status",
+    "pitr_recover",
     "cleanup_old_backups",
     "cleanup_old_wal_files",
     "sha256_of_file",

@@ -331,6 +331,12 @@ def _install_ops_routes(app: FastAPI) -> None:
                 "details": {"backups": backups_deleted, "wal": []},
             }
 
+        from .backup import pitr_recover
+
+        @app.post("/health/dr/pitr/recover", tags=["ops"])
+        def dr_pitr_recover(backup_filename: str, target_time: str | None = None):
+            return pitr_recover(backup_filename, target_time=target_time)
+
     @app.get("/metrics", tags=["ops"])
     def metrics(request: Request):
         settings = get_settings()
