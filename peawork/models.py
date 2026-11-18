@@ -119,6 +119,9 @@ class User(TimestampMixin, Base):
     is_sample: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false(), nullable=False
     )
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_backup_codes: Mapped[str | None] = mapped_column(String, nullable=True)  # JSON-encoded list
     employee_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("employees.id", ondelete="SET NULL"), index=True
     )

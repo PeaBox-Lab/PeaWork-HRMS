@@ -176,6 +176,86 @@ def generate_backup_codes(count: int = 8, digits: int = 8) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# MFA Enforcement
+# ---------------------------------------------------------------------------
+
+def enforce_mfa(user) -> bool:
+    """Check if MFA is enforced for this user.
+
+    Returns True if MFA is required for this user's next login.
+    - Admins and HR are always exempt.
+    - Users with mfa_enabled=true must complete MFA on next login.
+    - Users without mfa_enabled are exempt unless enforced at org level.
+    """
+    from .models import User as UserModel
+
+    # Admins and HR are always exempt from MFA
+    from .domain import Role
+    if user.role in {Role.ADMIN, Role.HR}:
+        return False
+
+    # If user has mfa_enabled=true, MFA is required
+    if user.mfa_enabled:
+        return True
+
+    return False
+
+
+def verify_mfa_token(user, token: str) -> bool:
+    """Verify an MFA TOTP token for the given user.
+
+    Args:
+        user: The User object
+        token: The 6-digit TOTP token string
+
+    Returns:
+        True if the token is valid, False otherwise.
+    """
+    from datetime import timezone as dt_timezone
+
+    if not user.mfa_secret:
+        return False
+
+    from . import compute_totp
+    expected = compute_totp(user.mfa_secret, interval=30, digits=6)
+    return expected == token
+
+
+def generate_mfa_backup_code(user, used: bool = True) -> str | None:
+    """Generate or rotate a single backup code for the user.
+
+    Args:
+        user: The User object
+        used: If True, mark the used code as consumed (remove from list).
+              If False, just return a new code without modifying the list.
+
+    Returns:
+        A backup code string, or None if no codes available.
+    """
+    import json
+
+    codes = []
+    if user.mfa_backup_codes:
+        codes = json.loads(user.mfa_backup_codes)
+
+    if not codes:
+        return None
+
+    if used:
+        # Remove the first code from the list
+        codes = codes[1:]
+        user.mfa_backup_codes = json.dumps(codes)
+    else:
+        # Add a new code at the beginning
+        from . import generate_backup_codes as _generate
+        new_code = _generate(count=1, digits=6)[0]
+        codes.insert(0, new_code)
+        user.mfa_backup_codes = json.dumps(codes)
+
+    return codes[0]
+
+
+# ---------------------------------------------------------------------------
 # Exported symbols
 # ---------------------------------------------------------------------------
 
@@ -192,4 +272,7 @@ __all__ = [
     "compute_totp",
     "compute_hotp",
     "generate_backup_codes",
+    "enforce_mfa",
+    "verify_mfa_token",
+    "generate_mfa_backup_code",
 ]
