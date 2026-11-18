@@ -41,6 +41,16 @@ def _backup_dir() -> Path:
     return base
 
 
+def _wal_archive_dir() -> Path | None:
+    """Get WAL archive directory if PITR is enabled."""
+    settings = get_settings()
+    if not settings.pitr_enabled or not settings.pitr_wal_archive_dir:
+        return None
+    wal_dir = Path(settings.pitr_wal_archive_dir)
+    wal_dir.mkdir(parents=True, exist_ok=True)
+    return wal_dir
+
+
 def list_backups() -> list[dict[str, Any]]:
     """Return a list of backup files with metadata."""
     base = _backup_dir()
@@ -166,7 +176,7 @@ def delete_backup(filename: str) -> None:
 def pitr_status() -> dict[str, Any]:
     """Return PITR status information."""
     settings = get_settings()
-    wal_dir = Path(settings.pitr_wal_archive_dir) if settings.pitr_wal_archive_dir else None
+    wal_dir = _wal_archive_dir()
     archived = 0
     if wal_dir and wal_dir.exists():
         archived = len(list(wal_dir.glob("*.wal")))
@@ -180,6 +190,50 @@ def pitr_status() -> dict[str, Any]:
     }
 
 
+def cleanup_old_backups(retention_days: int | None = None) -> list[str]:
+    """Delete backups older than retention_days.
+
+    Uses PEAWORK_BACKUP_RETENTION_DAYS if not specified.
+    """
+    settings = get_settings()
+    days = retention_days or settings.backup_retention_days
+    deleted = []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    for backup in list_backups():
+        try:
+            created = datetime.fromisoformat(backup["created_at"])
+            if created < cutoff:
+                delete_backup(backup["filename"])
+                deleted.append(backup["filename"])
+        except Exception:
+            pass
+    return deleted
+
+
+def cleanup_old_wal_files(retention_days: int | None = None) -> int:
+    """Delete WAL archive files older than retention_days.
+
+    Uses PEAWORK_PITR_RETENTION_DAYS if not specified.
+    """
+    settings = get_settings()
+    days = retention_days or settings.pitr_retention_days
+    wal_dir = _wal_archive_dir()
+    if not wal_dir or not wal_dir.exists():
+        return 0
+
+    deleted = 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    for wal_file in wal_dir.glob("*.wal"):
+        try:
+            mtime = datetime.fromtimestamp(wal_file.stat().st_mtime, tz=timezone.utc)
+            if mtime < cutoff:
+                wal_file.unlink()
+                deleted += 1
+        except Exception:
+            pass
+    return deleted
+
+
 def sha256_of_file(filename: str) -> str:
     """Return the SHA-256 checksum for a backup file."""
     return _sha256(_backup_dir() / filename)
@@ -191,5 +245,7 @@ __all__ = [
     "restore_backup",
     "delete_backup",
     "pitr_status",
+    "cleanup_old_backups",
+    "cleanup_old_wal_files",
     "sha256_of_file",
 ]

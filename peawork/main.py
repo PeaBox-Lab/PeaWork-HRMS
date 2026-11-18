@@ -222,6 +222,8 @@ def _install_error_handlers(app: FastAPI) -> None:
 
 
 def _install_ops_routes(app: FastAPI) -> None:
+    settings = get_settings()
+
     @app.get("/health", tags=["ops"])
     def health():
         settings = get_settings()
@@ -276,6 +278,58 @@ def _install_ops_routes(app: FastAPI) -> None:
         manager = get_ha_manager()
         asyncio.create_task(manager.heartbeat(node_id))
         return {"detail": "heartbeat recorded"}
+
+    # Backup/DR routes (if enabled)
+    if settings.backup_enabled:
+        from .backup import (
+            create_backup as _create_backup,
+            restore_backup as _restore_backup,
+            list_backups as _list_backups,
+            delete_backup as _delete_backup,
+            pitr_status as _pitr_status,
+            cleanup_old_backups,
+            cleanup_old_wal_files,
+        )
+
+        @app.get("/health/dr", tags=["ops"])
+        def health_dr():
+            return {
+                "backup_enabled": settings.backup_enabled,
+                "cross_region": settings.backup_cross_region,
+                "pitr_enabled": settings.pitr_enabled,
+                "retention_days": settings.backup_retention_days,
+            }
+
+        @app.get("/health/dr/backups", tags=["ops"])
+        def dr_list_backups():
+            return _list_backups()
+
+        @app.post("/health/dr/backups", tags=["ops"])
+        def dr_create_backup(label: str = "manual"):
+            return _create_backup(label=label)
+
+        @app.post("/health/dr/backups/{filename}/restore", tags=["ops"])
+        def dr_restore_backup(filename: str):
+            return _restore_backup(filename)
+
+        @app.delete("/health/dr/backups/{filename}", tags=["ops"])
+        def dr_delete_backup(filename: str):
+            _delete_backup(filename)
+            return {"detail": "backup deleted"}
+
+        @app.get("/health/dr/pitr", tags=["ops"])
+        def dr_pitr_status():
+            return _pitr_status()
+
+        @app.post("/health/dr/cleanup", tags=["ops"])
+        def dr_cleanup(backup_days: int | None = None, wal_days: int | None = None):
+            backups_deleted = cleanup_old_backups(backup_days)
+            wal_deleted = cleanup_old_wal_files(wal_days)
+            return {
+                "backups_deleted": len(backups_deleted),
+                "wal_files_deleted": wal_deleted,
+                "details": {"backups": backups_deleted, "wal": []},
+            }
 
     @app.get("/metrics", tags=["ops"])
     def metrics(request: Request):
