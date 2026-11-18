@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import get_settings
+from .config import get_settings
 
 
 def _now_iso() -> str:

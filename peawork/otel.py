@@ -24,7 +24,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 # Configuration
 # ---------------------------------------------------------------------------
 
-from ..config import get_settings
+from .config import get_settings
 
 settings = get_settings()
 

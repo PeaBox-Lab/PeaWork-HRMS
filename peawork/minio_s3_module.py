@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, BinaryIO, Optional, Union
 
-from ..config import get_settings
+from .config import get_settings
 
 settings = get_settings()
 

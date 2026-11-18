@@ -17,7 +17,7 @@ from typing import Any
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ..config import get_settings
+from .config import get_settings
 
 
 @dataclass

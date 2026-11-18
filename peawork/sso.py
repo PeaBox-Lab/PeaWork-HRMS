@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select, update, or_, func
 from sqlalchemy.orm import Session
 
-from ..config import get_settings
+from .config import get_settings
 from ..db import get_db, utcnow
 from ..domain import Role, CheckInStatus
 from ..models import User, Employee, Organization
