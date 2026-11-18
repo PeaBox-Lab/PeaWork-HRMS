@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -84,6 +85,16 @@ async def lifespan(app: FastAPI):
         for node_id in settings.ha_nodes:
             await ha_manager.register_node(node_id)
 
+    # Initialize DR / backup services
+    if settings.backup_enabled:
+        log.info("DR backups enabled (cron=%s, retention=%d days)",
+                 settings.backup_schedule_cron, settings.backup_retention_days)
+
+    # Initialize billing (log only; no external provider yet)
+    if settings.billing_enabled:
+        log.info("Billing enabled (default plan=%s, currency=%s)",
+                 settings.billing_default_plan, settings.billing_currency)
+
     log.info(
         "PeaWork %s started (env=%s, db=%s)",
         __version__,
@@ -95,9 +106,6 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(ha_manager._monitor_readiness())
 
     yield
-
-
-def _problem(status: int, title: str, detail: str) -> JSONResponse:
 
 
 def create_app() -> FastAPI:

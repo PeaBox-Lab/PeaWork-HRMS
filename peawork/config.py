@@ -129,6 +129,19 @@ class Settings(BaseSettings):
     pitr_recovery_target_time: str | None = None  # ISO timestamp
     pitr_retention_days: int = 35
 
+    # R5 — Billing & Subscription
+    billing_enabled: bool = False
+    billing_provider: str | None = None  # "stripe" | "paddle" | "none"
+    billing_api_key: str | None = None  # sensitive: rotate in CI
+    billing_webhook_secret: str | None = None  # sensitive: rotate in CI
+    billing_default_plan: str = "free"
+    billing_currency: str = "INR"
+    billing_trial_days: int = 14
+    billing_limit_users: int = 100
+    billing_limit_storage_mb: int = 1024
+    billing_limit_api_calls_per_day: int = 10000
+    billing_overage_enabled: bool = False
+
     @property
     def is_production(self) -> bool:
         return self.env.lower() in {"production", "prod"}
