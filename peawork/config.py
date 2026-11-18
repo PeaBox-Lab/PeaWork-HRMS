@@ -117,6 +117,18 @@ class Settings(BaseSettings):
     ha_max_unhealthy_nodes: int = 1  # max nodes allowed to be unhealthy
     ha_backup_enabled: bool = False  # enable automated backup during HA
 
+    # R5 — Disaster Recovery & Backups
+    backup_enabled: bool = False
+    backup_schedule_cron: str = "0 2 * * *"  # daily at 2am
+    backup_retention_days: int = 30
+    backup_compression: str = "gzip"  # or "none"
+    backup_object_storage_bucket: str | None = None
+    backup_cross_region: bool = False
+    pitr_enabled: bool = False
+    pitr_wal_archive_dir: str | None = None
+    pitr_recovery_target_time: str | None = None  # ISO timestamp
+    pitr_retention_days: int = 35
+
     @property
     def is_production(self) -> bool:
         return self.env.lower() in {"production", "prod"}
