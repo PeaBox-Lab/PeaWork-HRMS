@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     # Background jobs (R2+)
     redis_url: str | None = None
 
+    # R5 — OpenTelemetry observability
+    otel_enabled: bool = False
+    otel_service_name: str = "peawork-hrms"
+    otel_endpoint: str | None = None  # OTLP endpoint URL
+    otel_insecure: bool = False
+    otel_sample_rate: float = 1.0  # 0.0 to 1.0
+    otel_trace_id: str | None = None
+    otel_trace_flags: int = 1  # bit flags for trace processing
+
     @property
     def is_production(self) -> bool:
         return self.env.lower() in {"production", "prod"}

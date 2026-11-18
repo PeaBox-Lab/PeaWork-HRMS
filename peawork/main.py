@@ -119,6 +119,11 @@ def create_app() -> FastAPI:
     app.include_router(api_v1.router)
     app.include_router(api_devices.router)
 
+    # R5 — OpenTelemetry observability (no-op unless PEAWORK_OTEL_ENABLED=true)
+    from .otel import init_otel as init_observability
+
+    init_observability(app)
+
     _install_error_handlers(app)
     _install_ops_routes(app)
     return app
