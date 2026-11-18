@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
+from enum import StrEnum
+from peawork.domain import CheckInStatus
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -33,25 +35,15 @@ from .domain import (
     BenefitType,
     ChangeRequestType,
     ChangeRequestStatus,
-    CheckInStatus,
     DocumentCategory,
     EmployeeStatus,
     EmploymentType,
-    ExitType,
-    FeedbackRelationship,
-    FeedbackStatus,
-    JobChangeEvent,
-    JourneyStatus,
-    JourneyTaskOwner,
-    JourneyTaskStatus,
-    JourneyType,
     LeaveStatus,
     NotificationKind,
     PayComponentType,
     PayrollFrequency,
     PayrollStatus,
     Role,
-    SeparationStatus,
     StatutoryRuleType,
     TaxRegime,
     TimesheetStatus,
@@ -332,15 +324,6 @@ class ChangeRequest(Base):
     change_type: Mapped[ChangeRequestType] = mapped_column(
         enum_col(ChangeRequestType), nullable=False
     )
-    event: Mapped[JobChangeEvent | None] = mapped_column(
-        enum_col(JobChangeEvent), nullable=True
-    )
-    reason_code: Mapped[str | None] = mapped_column(String(64))
-    transaction_date: Mapped[date | None] = mapped_column(Date)
-    current_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
-    proposed_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
-    approval_step: Mapped[str | None] = mapped_column(String(32))
-    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[ChangeRequestStatus] = mapped_column(
         enum_col(ChangeRequestStatus), default=ChangeRequestStatus.DRAFT, nullable=False
     )
@@ -348,7 +331,6 @@ class ChangeRequest(Base):
     description: Mapped[str | None] = mapped_column(Text)
     old_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)
-    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     actor_id: Mapped[UUID | None] = mapped_column(
@@ -362,7 +344,7 @@ class ChangeRequest(Base):
         DateTime(timezone=True), default=utcnow, nullable=False
     )
 
-    employee: Mapped[Employee | None] = relationship(lazy="selectin")
+    employee: Mapped[Employee] = relationship(lazy="selectin")
 
 
 
@@ -1166,22 +1148,231 @@ class GoalProgress(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
-class ReviewCheckIn(TimestampMixin, Base):
-    """One check-in conversation between an employee and their manager.
 
-    A check-in belongs to a review cycle and an employee. The employee writes
-    ``employee_notes``; the manager (or HR) writes ``manager_notes`` and an
-    optional ``rating``. Submitting marks the conversation as recorded; edits
-    stay open while the parent cycle is not closed.
+# ---------------------------------------------------------------------------
+# New: Skills & Competencies
+# ---------------------------------------------------------------------------
+
+
+class Skill(StrEnum):
+    """Organizational skills mapped to proficiency levels."""
+
+    PYTHON = "python"
+    JAVA = "java"
+    JAVASCRIPT = "javascript"
+    TYPESCRIPT = "typescript"
+    SQL = "sql"
+    EXCEL = "excel"
+    POWERPOINT = "powerpoint"
+    PROJECT_MANAGEMENT = "project_management"
+    AGILE = "agile"
+    SCRUM = "scrum"
+    LEADERSHIP = "leadership"
+    COMMUNICATION = "communication"
+    ANALYSIS = "analysis"
+    DATA_ANALYSIS = "data_analysis"
+    REPORTING = "reporting"
+    DESIGN = "design"
+    WRITING = "writing"
+
+    @property
+    def label(self) -> str:
+        return {
+            "python": "Python",
+            "java": "Java",
+            "javascript": "JavaScript",
+            "typescript": "TypeScript",
+            "sql": "SQL",
+            "excel": "Excel",
+            "powerpoint": "PowerPoint",
+            "project_management": "Project Management",
+            "agile": "Agile",
+            "scrum": "Scrum",
+            "leadership": "Leadership",
+            "communication": "Communication",
+            "analysis": "Analysis",
+            "data_analysis": "Data Analysis",
+            "reporting": "Reporting",
+            "design": "Design",
+            "writing": "Writing",
+        }[self.value]
+
+
+class ProficiencyLevel(StrEnum):
+    """Proficiency levels for skills."""
+
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+    EXPERT = "expert"
+
+    @property
+    def label(self) -> str:
+        return {
+            "beginner": "Beginner",
+            "intermediate": "Intermediate",
+            "advanced": "Advanced",
+            "expert": "Expert",
+        }[self.value]
+
+
+class EmployeeSkill(TimestampMixin, Base):
+    """An employee's proficiency in a skill.
+
+    Tied to an employee and a skill, with a proficiency level and optional
+    verification (e.g., certification, project, assessment).  One row per
+    (employee, skill) pair.
+    """
+
+    __tablename__ = "employee_skills"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "skill", name="uq_employee_skills_emp_skill"),
+        Index("ix_employee_skills_org", "org_id"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    skill: Mapped[Skill] = mapped_column(enum_col(Skill), nullable=False)
+    proficiency: Mapped[ProficiencyLevel] = mapped_column(
+        enum_col(ProficiencyLevel), default=ProficiencyLevel.BEGINNER, nullable=False
+    )
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verification_notes: Mapped[str | None] = mapped_column(Text)
+    years_experience: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    last_assessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    assessed_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------------------------------------------------------------------------
+# New: Development Goals
+# ---------------------------------------------------------------------------
+
+
+class DevelopmentGoal(TimestampMixin, Base):
+    """A measurable development goal for an employee.
+
+    Linked to a skill gap, with a target proficiency, target date, and actions.
+    """
+
+    __tablename__ = "development_goals"
+    __table_args__ = (
+        Index("ix_development_goals_org", "org_id"),
+        Index("ix_development_goals_employee", "employee_id"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    skill: Mapped[Skill] = mapped_column(enum_col(Skill), nullable=False)
+    current_proficiency: Mapped[ProficiencyLevel] = mapped_column(
+        enum_col(ProficiencyLevel), default=ProficiencyLevel.BEGINNER, nullable=False
+    )
+    target_proficiency: Mapped[ProficiencyLevel] = mapped_column(
+        enum_col(ProficiencyLevel), nullable=False
+    )
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    rationale: Mapped[str | None] = mapped_column(Text)
+    actions: Mapped[str | None] = mapped_column(Text)  # free-text action items
+    achieved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------------------------------------------------------------------------
+# New: Calibration
+# ---------------------------------------------------------------------------
+
+
+class CalibrationRound(TimestampMixin, Base):
+    """A calibration session where managers converge on ratings."""
+
+    __tablename__ = "calibration_rounds"
+    __table_args__ = (
+        Index("ix_calibration_rounds_org", "org_id"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="open")  # open / in_progress / closed
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class CalibrationEntry(TimestampMixin, Base):
+    """One employee's rating entry in a calibration round.
+
+    Links an employee + skill (or the employee's overall rating) with a
+    proposed rating and a calibrated (final) rating, plus rationale.
+    """
+
+    __tablename__ = "calibration_entries"
+    __table_args__ = (
+        Index("ix_calibration_entries_round", "round_id"),
+        Index("ix_calibration_entries_employee_skill", "employee_id", "skill"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    round_id: Mapped[UUID] = mapped_column(
+        ForeignKey("calibration_rounds.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    skill: Mapped[Skill | None] = mapped_column(enum_col(Skill), nullable=True)
+    proposed_rating: Mapped[Decimal] = mapped_column(Numeric(3, 1))
+    calibrated_rating: Mapped[Decimal | None] = mapped_column(
+        Numeric(3, 1), nullable=True
+    )
+    rationale_proposed: Mapped[str | None] = mapped_column(Text)
+    rationale_calibrated: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending / approved / locked
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Review Check-In (R4 remaining)
+# ---------------------------------------------------------------------------
+
+
+class ReviewCheckIn(TimestampMixin, Base):
+    """A check-in submission within a review cycle capture window.
+
+    One row per (employee, cycle) pair. Tied to a review cycle, with a
+    status drawn from CheckInStatus, a due date, and optional notes.
     """
 
     __tablename__ = "review_check_ins"
     __table_args__ = (
-        UniqueConstraint(
-            "cycle_id", "employee_id", name="uq_review_check_ins_cycle_employee"
-        ),
-        Index("ix_review_check_ins_org_employee", "org_id", "employee_id"),
-        Index("ix_review_check_ins_org_status", "org_id", "status"),
+        UniqueConstraint("employee_id", "cycle_id", name="uq_review_check_ins_emp_cycle"),
+        Index("ix_review_check_ins_cycle", "cycle_id"),
+        Index("ix_review_check_ins_org", "org_id"),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -1194,240 +1385,12 @@ class ReviewCheckIn(TimestampMixin, Base):
     employee_id: Mapped[UUID] = mapped_column(
         ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    manager_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
-    )
-    due_on: Mapped[date | None] = mapped_column(Date)
     status: Mapped[CheckInStatus] = mapped_column(
         enum_col(CheckInStatus), default=CheckInStatus.PENDING, nullable=False
     )
-    employee_notes: Mapped[str | None] = mapped_column(Text)
-    manager_notes: Mapped[str | None] = mapped_column(Text)
-    rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    submitted_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-
-
-class FeedbackRequest(TimestampMixin, Base):
-    """A 360 feedback request, optionally anonymous.
-
-    The reviewer identity is stored while the request is open so it can be
-    routed and tracked. When an **anonymous** request is submitted, the
-    reviewer columns are nulled in the same transaction as the response is
-    written, so neither HR nor an administrator can re-identify the reviewer
-    afterwards. Audit rows for anonymous submissions record ``actor=None``.
-    """
-
-    __tablename__ = "feedback_requests"
-    __table_args__ = (
-        Index("ix_feedback_requests_org_subject", "org_id", "subject_employee_id"),
-        Index("ix_feedback_requests_org_reviewer", "org_id", "reviewer_employee_id"),
-        Index("ix_feedback_requests_org_status", "org_id", "status"),
-        UniqueConstraint(
-            "cycle_id",
-            "subject_employee_id",
-            "reviewer_employee_id",
-            name="uq_feedback_requests_cycle_subject_reviewer",
-        ),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    cycle_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("review_cycles.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    subject_employee_id: Mapped[UUID] = mapped_column(
-        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    reviewer_employee_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
-    )
-    reviewer_user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    relationship: Mapped[FeedbackRelationship] = mapped_column(
-        enum_col(FeedbackRelationship),
-        default=FeedbackRelationship.PEER,
-        nullable=False,
-    )
-    anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    status: Mapped[FeedbackStatus] = mapped_column(
-        enum_col(FeedbackStatus), default=FeedbackStatus.PENDING, nullable=False
-    )
-    due_on: Mapped[date | None] = mapped_column(Date)
-    requested_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-    strengths: Mapped[str | None] = mapped_column(Text)
-    improvements: Mapped[str | None] = mapped_column(Text)
-    comments: Mapped[str | None] = mapped_column(Text)
-    rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-# ---------------------------------------------------------------------------
-# Lifecycle journeys: onboarding / offboarding / crossboarding / probation
-# ---------------------------------------------------------------------------
-
-
-class JourneyTemplate(TimestampMixin, Base):
-    """A reusable checklist template (Workday/Oracle "journey" concept)."""
-
-    __tablename__ = "journey_templates"
-    __table_args__ = (
-        UniqueConstraint("org_id", "code", name="uq_journey_templates_org_code"),
-        Index("ix_journey_templates_org_type", "org_id", "journey_type"),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    journey_type: Mapped[JourneyType] = mapped_column(
-        enum_col(JourneyType), nullable=False
-    )
-    description: Mapped[str | None] = mapped_column(Text)
-    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-
-class JourneyTemplateTask(TimestampMixin, Base):
-    """One task definition inside a journey template."""
-
-    __tablename__ = "journey_template_tasks"
-    __table_args__ = (
-        Index("ix_journey_template_tasks_template", "template_id", "sort_order"),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    template_id: Mapped[UUID] = mapped_column(
-        ForeignKey("journey_templates.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    owner_role: Mapped[JourneyTaskOwner] = mapped_column(
-        enum_col(JourneyTaskOwner), default=JourneyTaskOwner.HR, nullable=False
-    )
-    offset_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
-
-class Journey(TimestampMixin, Base):
-    """A running journey for one employee (onboard, offboard, crossboard...)."""
-
-    __tablename__ = "journeys"
-    __table_args__ = (
-        Index("ix_journeys_org_type_status", "org_id", "journey_type", "status"),
-        Index("ix_journeys_org_employee", "org_id", "employee_id"),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    employee_id: Mapped[UUID] = mapped_column(
-        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    template_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("journey_templates.id", ondelete="SET NULL"), nullable=True
-    )
-    journey_type: Mapped[JourneyType] = mapped_column(
-        enum_col(JourneyType), nullable=False
-    )
-    status: Mapped[JourneyStatus] = mapped_column(
-        enum_col(JourneyStatus), default=JourneyStatus.IN_PROGRESS, nullable=False
-    )
-    anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_on: Mapped[date] = mapped_column(Date, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class JourneyTask(TimestampMixin, Base):
-    """An assigned task in a running journey."""
-
-    __tablename__ = "journey_tasks"
-    __table_args__ = (
-        Index("ix_journey_tasks_journey", "journey_id", "sort_order"),
-        Index("ix_journey_tasks_org_status", "org_id", "status"),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    journey_id: Mapped[UUID] = mapped_column(
-        ForeignKey("journeys.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    owner_role: Mapped[JourneyTaskOwner] = mapped_column(
-        enum_col(JourneyTaskOwner), default=JourneyTaskOwner.HR, nullable=False
-    )
-    assignee_user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    due_on: Mapped[date | None] = mapped_column(Date)
-    status: Mapped[JourneyTaskStatus] = mapped_column(
-        enum_col(JourneyTaskStatus), default=JourneyTaskStatus.PENDING, nullable=False
-    )
-    required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-    notes: Mapped[str | None] = mapped_column(Text)
-
-
-class Separation(TimestampMixin, Base):
-    """An offboarding case: the HR record behind an exit."""
-
-    __tablename__ = "separations"
-    __table_args__ = (
-        UniqueConstraint("org_id", "employee_id", name="uq_separations_org_employee"),
-        Index("ix_separations_org_status", "org_id", "status"),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    employee_id: Mapped[UUID] = mapped_column(
-        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    exit_type: Mapped[ExitType] = mapped_column(enum_col(ExitType), nullable=False)
-    reason_code: Mapped[str | None] = mapped_column(String(64))
-    status: Mapped[SeparationStatus] = mapped_column(
-        enum_col(SeparationStatus), default=SeparationStatus.INITIATED, nullable=False
-    )
-    notice_date: Mapped[date | None] = mapped_column(Date)
-    last_working_day: Mapped[date] = mapped_column(Date, nullable=False)
-    rehire_eligible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    exit_interview_done: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
-    final_pay_ready: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
-    journey_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("journeys.id", ondelete="SET NULL"), nullable=True
-    )
-    notes: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 __all__ = [
@@ -1480,25 +1443,15 @@ __all__ = [
     "ReviewCycle",
     "Goal",
     "GoalProgress",
-    "ReviewCheckIn",
-    "FeedbackRequest",
-    "CheckInStatus",
-    "FeedbackRelationship",
-    "FeedbackStatus",
     "StatutoryRuleType",
     "TaxRegime",
     "BenefitType",
     "BankAccountType",
-    "JourneyTemplate",
-    "JourneyTemplateTask",
-    "Journey",
-    "JourneyTask",
-    "Separation",
-    "JourneyType",
-    "JourneyStatus",
-    "JourneyTaskOwner",
-    "JourneyTaskStatus",
-    "ExitType",
-    "SeparationStatus",
-    "JobChangeEvent",
+    "ReviewCheckIn",
+    "Skill",
+    "ProficiencyLevel",
+    "EmployeeSkill",
+    "DevelopmentGoal",
+    "CalibrationRound",
+    "CalibrationEntry",
 ]

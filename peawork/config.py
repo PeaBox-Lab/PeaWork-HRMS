@@ -65,6 +65,19 @@ class Settings(BaseSettings):
     metrics_token: str | None = None
     log_level: str = "INFO"
 
+    # R5 — SSO / OIDC
+    sso_enabled: bool = False
+    sso_provider: str | None = None  # "oidc" | "saml"
+    sso_client_id: str | None = None
+    sso_client_secret: str | None = None  # sensitive: rotate in CI
+    sso_authorization_endpoint: str | None = None
+    sso_token_endpoint: str | None = None
+    sso_userinfo_endpoint: str | None = None
+    sso_jwks_url: str | None = None  # JSON Web Key Set for token validation
+    sso_redirect_url: str | None = None  # must match IdP callback
+    sso_scope: str = "openid profile email"
+    sso_session_timeout_minutes: int = 60
+
     # Background jobs (R2+)
     redis_url: str | None = None
 

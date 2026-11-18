@@ -23,6 +23,68 @@ class Role(StrEnum):
         }[self.value]
 
 
+class Skill(StrEnum):
+    """Organizational skills mapped to proficiency levels."""
+
+    PYTHON = "python"
+    JAVA = "java"
+    JAVASCRIPT = "javascript"
+    TYPESCRIPT = "typescript"
+    SQL = "sql"
+    EXCEL = "excel"
+    POWERPOINT = "powerpoint"
+    PROJECT_MANAGEMENT = "project_management"
+    AGILE = "agile"
+    SCRUM = "scrum"
+    LEADERSHIP = "leadership"
+    COMMUNICATION = "communication"
+    ANALYSIS = "analysis"
+    DATA_ANALYSIS = "data_analysis"
+    REPORTING = "reporting"
+    DESIGN = "design"
+    WRITING = "writing"
+
+    @property
+    def label(self) -> str:
+        return {
+            "python": "Python",
+            "java": "Java",
+            "javascript": "JavaScript",
+            "typescript": "TypeScript",
+            "sql": "SQL",
+            "excel": "Excel",
+            "powerpoint": "PowerPoint",
+            "project_management": "Project Management",
+            "agile": "Agile",
+            "scrum": "Scrum",
+            "leadership": "Leadership",
+            "communication": "Communication",
+            "analysis": "Analysis",
+            "data_analysis": "Data Analysis",
+            "reporting": "Reporting",
+            "design": "Design",
+            "writing": "Writing",
+        }[self.value]
+
+
+class ProficiencyLevel(StrEnum):
+    """Proficiency levels for skills."""
+
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+    EXPERT = "expert"
+
+    @property
+    def label(self) -> str:
+        return {
+            "beginner": "Beginner",
+            "intermediate": "Intermediate",
+            "advanced": "Advanced",
+            "expert": "Expert",
+        }[self.value]
+
+
 class EmployeeStatus(StrEnum):
     ACTIVE = "active"
     PROBATION = "probation"

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Development Goals - PeaWork HRMS{% endblock %}
+{% block heading %}Development Goals{% endblock %}
+{% block subheading %}Measurable development plans and skill gaps{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Development Goals</h1>
+    <p>Measurable development plans with target proficiency and deadlines.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--primary" href="/development-goals/upsert">Create Development Goal</a>
+    <a class="btn btn--ghost" href="/">Talent</a>
+  </div>
+</div>
+
+{% if goals %}
+<div class="grid grid--2">
+  {% for goal in goals %}
+  <div class="card">
+    <div class="card__header">
+      <h3>{{ goal.skill_label }} - {{ goal.employee_name }}</h3>
+      <span class="badge badge--{{ goal.current_proficiency }}">{{ goal.current_proficiency_label }} → <span class="badge badge--{{ goal.target_proficiency }}">{{ goal.target_proficiency_label }}</span></span>
+    </div>
+    <div class="card__body">
+      <p><strong>Target date:</strong> {{ goal.target_date }}</p>
+      <p><strong>Status:</strong> {{ goal.status }}</p>
+      {% if goal.rationale %}<p><strong>Rationale:</strong> {{ goal.rationale }}</p>{% endif %}
+      {% if goal.actions %}<p><strong>Action items:</strong> {{ goal.actions }}</p>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid grid--main section">
+  <div class="stack">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Skill</th>
+          <th>Current</th>
+          <th>Target</th>
+          <th>Target Date</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for goal in goals %}
+        <tr>
+          <td><strong>{{ goal.employee_name }}</strong></td>
+          <td>{{ goal.skill_label }}</td>
+          <td><span class="badge badge--{{ goal.current_proficiency }}">{{ goal.current_proficiency_label }}</span></td>
+          <td><span class="badge badge--{{ goal.target_proficiency }}">{{ goal.target_proficiency_label }}</span></td>
+          <td>{{ goal.target_date }}</td>
+          <td><span class="badge badge--{{ goal.status }}">{{ goal.status }}</span></td>
+          <td>
+            <a class="btn btn--link btn--sm" href="/development-goals/upsert?employee_id={{ goal.employee_id }}&skill={{ goal.skill }}">Edit</a>
+            <form method="post" action="/development-goals/{{ goal.id }}/delete" style="display:inline">
+              <button class="btn btn--danger btn--sm" onclick="return confirm('Delete this development goal?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="empty">
+  <strong>No development goals yet</strong>
+  <p>Create development plans to track skill growth and career progression.</p>
+  <a class="btn btn--primary" href="/development-goals/upsert">Create First Goal</a>
+</div>
+{% endif %}
+{% endblock %}

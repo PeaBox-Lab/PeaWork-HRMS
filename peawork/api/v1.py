@@ -14,14 +14,12 @@ from ..domain import AuditAction, DocumentCategory, JobStatus, Role, TimesheetSt
 from ..models import (
     AuditEvent,
     BiometricDevice,
-    Department,
+    CalibrationEntry,
+    CalibrationRound,
+    DevelopmentGoal,
     Employee,
-    LeaveType,
-    PayrollRun,
-    Position,
-    Shift,
-    User,
-    WorkSchedule,
+    EmployeeSkill,
+    Skill,
 )
 from ..schemas import (
     AuditEventOut,
@@ -2187,6 +2185,189 @@ def api_separation_advance(
         final_pay_ready=payload.get("final_pay_ready"),
         exit_interview_done=payload.get("exit_interview_done"),
         rehire_eligible=payload.get("rehire_eligible"),
+    )
+
+
+# --- Skills & Competencies ---
+
+@router.get("/skills", response_model=list[dict])
+def api_skills_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_employee_skills(
+        db, org_id=user.org_id, employee_id=None
+    )
+
+@router.post("/skills", status_code=201)
+def api_skill_upsert(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR, Role.MANAGER)),
+):
+    employee_id = payload.get("employee_id")
+    skill = payload.get("skill")
+    proficiency = payload.get("proficiency")
+    verified = payload.get("verified", False)
+    years_experience = payload.get("years_experience")
+    notes = payload.get("notes")
+    if not employee_id or not skill:
+        raise ValidationError("employee_id and skill are required")
+    return talent_service.upsert_employee_skill(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        employee_id=str(employee_id),
+        skill=str(skill),
+        proficiency=proficiency,
+        verified=verified,
+        years_experience=years_experience,
+        notes=notes,
+    )
+
+@router.get("/skills/{employee_id}", response_model=list[dict])
+def api_skills_for_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_employee_skills(
+        db, org_id=user.org_id, employee_id=employee_id
+    )
+
+# --- Development Goals ---
+
+@router.get("/development-goals", response_model=list[dict])
+def api_dev_goals_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_development_goals(
+        db, org_id=user.org_id
+    )
+
+@router.post("/development-goals", status_code=201)
+def api_dev_goal_upsert(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR, Role.MANAGER)),
+):
+    employee_id = payload.get("employee_id")
+    skill = payload.get("skill")
+    current_proficiency = payload.get("current_proficiency")
+    target_proficiency = payload.get("target_proficiency")
+    target_date = payload.get("target_date")
+    rationale = payload.get("rationale")
+    actions = payload.get("actions")
+    status = payload.get("status")
+    if not employee_id or not skill or not target_date:
+        raise ValidationError("employee_id, skill and target_date are required")
+    try:
+        target_date_obj = date.fromisoformat(str(target_date))
+    except ValueError:
+        raise ValidationError("target_date must be an ISO date (YYYY-MM-DD)")
+    return talent_service.upsert_development_goal(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        employee_id=str(employee_id),
+        skill=str(skill),
+        current_proficiency=current_proficiency,
+        target_proficiency=target_proficiency,
+        target_date=target_date_obj.isoformat(),
+        rationale=rationale,
+        actions=actions,
+        status=status,
+    )
+
+@router.get("/development-goals/{employee_id}", response_model=list[dict])
+def api_dev_goals_for_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_development_goals(
+        db, org_id=user.org_id, employee_id=employee_id
+    )
+
+# --- Calibration ---
+
+@router.get("/calibration-rounds", response_model=list[dict])
+def api_calibration_rounds_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_calibration_rounds(
+        db, org_id=user.org_id
+    )
+
+@router.post("/calibration-rounds", status_code=201)
+def api_calibration_round_upsert(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    name = payload.get("name")
+    description = payload.get("description")
+    start_date = payload.get("start_date")
+    end_date = payload.get("end_date")
+    status = payload.get("status")
+    if not name or not start_date or not end_date:
+        raise ValidationError("name, start_date and end_date are required")
+    try:
+        start = date.fromisoformat(str(start_date))
+        end = date.fromisoformat(str(end_date))
+    except ValueError:
+        raise ValidationError("Dates must be ISO dates (YYYY-MM-DD)")
+    if start > end:
+        raise ValidationError("start_date must not be after end_date")
+    return talent_service.upsert_calibration_round(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        name=name,
+        description=description,
+        start_date=start.isoformat(),
+        end_date=end.isoformat(),
+        status=status,
+    )
+
+@router.get("/calibration-rounds/{round_id}/entries", response_model=list[dict])
+def api_calibration_entries_list(
+    round_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_calibration_entries(
+        db, org_id=user.org_id, round_id=round_id
+    )
+
+@router.post("/calibration-rounds/{round_id}/entries", status_code=201)
+def api_calibration_entry_upsert(
+    round_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR, Role.MANAGER)),
+):
+    employee_id = payload.get("employee_id")
+    skill = payload.get("skill")
+    proposed_rating = payload.get("proposed_rating")
+    rationale_proposed = payload.get("rationale_proposed")
+    if not employee_id or not proposed_rating:
+        raise ValidationError("employee_id and proposed_rating are required")
+    return talent_service.upsert_calibration_entry(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        round_id=round_id,
+        employee_id=str(employee_id),
+        skill=skill,
+        proposed_rating=proposed_rating,
+        rationale_proposed=rationale_proposed,
     )
 
 

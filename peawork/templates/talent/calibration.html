@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Calibration - PeaWork HRMS{% endblock %}
+{% block heading %}Calibration{% endblock %}
+{% block subheading %}Manager convergence on ratings with proposed vs calibrated scores{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Calibration</h1>
+    <p>Calibration rounds where managers converge on employee rating agreements.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--primary" href="/calibration-rounds/upsert">Create Calibration Round</a>
+    <a class="btn btn--ghost" href="/">Talent</a>
+  </div>
+</div>
+
+{% if rounds %}
+<div class="grid grid--2">
+  {% for round in rounds %}
+  <div class="card">
+    <div class="card__header">
+      <h3>{{ round.name }}</h3>
+      <span class="badge badge--{{ round.status }}">{{ round.status|capitalize }}</span>
+    </div>
+    <div class="card__body">
+      <p><strong>Period:</strong> {{ round.start_date }} - {{ round.end_date }}</p>
+      <p><strong>Entries:</strong> {{ entries_count|default(0) }} entries</p>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid grid--main section">
+  <div class="stack">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Round</th>
+          <th>Period</th>
+          <th>Status</th>
+          <th>Entries</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for round in rounds %}
+        <tr>
+          <td>{{ round.name }}</td>
+          <td>{{ round.start_date }} - {{ round.end_date }}</td>
+          <td><span class="badge badge--{{ round.status }}">{{ round.status|title }}</span></td>
+          <td>{{ entries_count|default(0) }}</td>
+          <td>
+            <a class="btn btn--link btn--sm" href="/calibration-rounds/{{ round.id }}/entries">View Entries</a>
+            <form method="post" action="/calibration-rounds/{{ round.id }}/delete" style="display:inline">
+              <button class="btn btn--danger btn--sm" onclick="return confirm('Delete this calibration round?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="empty">
+  <strong>No calibration rounds yet</strong>
+  <p>Create calibration rounds to converge on employee ratings and ensure consistency.</p>
+  <a class="btn btn--primary" href="/calibration-rounds/upsert">Create First Round</a>
+</div>
+{% endif %}
+
+<h2>Recent Entries</h2>
+
+{% if entries %}
+<div class="grid grid--2">
+  {% for entry in entries %}
+  <div class="card">
+    <div class="card__header">
+      <h3>{{ entry.employee_name }}</h3>
+      {% if entry.skill %}<span class="badge badge--secondary">Skill: {{ entry.skill_label }}</span>{% endif %}
+    </div>
+    <div class="card__body">
+      <p><strong>Proposed:</strong> {{ entry.proposed_rating }}/5</p>
+      <p><strong>Calibrated:</strong> {% if entry.calibrated_rating %}{{ entry.calibrated_rating }}/5{% else %}Pending{% endif %}</p>
+      <p><strong>Status:</strong> {{ entry.status|capitalize }}</p>
+      {% if entry.rationale_proposed %}<p><strong>Proposed rationale:</strong> {{ entry.rationale_proposed }}</p>{% endif %}
+      {% if entry.rationale_calibrated %}<p><strong>Calibrated rationale:</strong> {{ entry.rationale_calibrated }}</p>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid grid--main section">
+  <div class="stack">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Skill</th>
+          <th>Proposed</th>
+          <th>Calibrated</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for entry in entries %}
+        <tr>
+          <td><strong>{{ entry.employee_name }}</strong></td>
+          <td>{{ entry.skill_label if entry.skill else '(overall)' }}</td>
+          <td>{{ entry.proposed_rating }}/5</td>
+          <td>{{ entry.calibrated_rating|default('—') }}/5</td>
+          <td><span class="badge badge--{{ entry.status|lower }}">{{ entry.status|title }}</span></td>
+          <td>
+            <a class="btn btn--link btn--sm" href="/calibration-rounds/{{ entry.round_id }}/entries/{{ entry.id }}/edit">Edit</a>
+            <form method="post" action="/calibration-entries/{{ entry.id }}/delete" style="display:inline">
+              <button class="btn btn--danger btn--sm" onclick="return confirm('Delete this calibration entry?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="empty">
+  <strong>No calibration entries yet</strong>
+  <p>Add entries to calibration rounds to record proposed and calibrated ratings.</p>
+</div>
+{% endif %}
+{% endblock %}

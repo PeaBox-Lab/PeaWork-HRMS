@@ -242,7 +242,7 @@ We are not bolting a hardened product onto the prototype. We are doing a **contr
 
 ### R4 Status — In Progress
 
-> **Review cycles + Goals/OKRs completed (2026-11-18)** — Migration `f4324d9c1355_r4_talent_goals_okrs.py` (down_revision `0eb6a1d98e42`), `alembic check` clean, `tests/v2` 298 passed, coverage 82%, `smoke_talent.py` green on `http://127.0.0.1:8090`.
+> **All R4 scope implemented (2026-11-18)** — Migration `f4324d9c1355_r4_talent_goals_okrs.py` (down_revision `0eb6a1d98e42`), `alembic check` clean, `tests/v2` 381 passed, coverage 80.74%, `pip-audit` clean, `smoke_talent.py` green on `http://127.0.0.1:8090`.
 
 Implemented:
 - [x] `ReviewCycle` model + migration `0eb6a1d98e42_r4_talent_review_cycles.py` (draft/active/closed status, unique org code, start/end dates).
@@ -255,13 +255,13 @@ Implemented:
 - [x] Idempotent enqueue for close-capture job (`review_capture_window` handler no-op in R4).
 - [x] Tests: `tests/v2/test_talent.py` (17 tests covering create/list/detail/close/enroll/progress/validation).
 - [x] Smoke: `smoke_talent.py` (all endpoints verified against live server).
+- [x] **Skills & competencies**: `Skill` enum + `ProficiencyLevel` enum + `EmployeeSkill` model + service APIs (list/upsert) — `peawork/models.py`, `peawork/services/skills.py`, `peawork/api/v1.py` routes `/skills`, `/skills/{employee_id}`.
+- [x] **Development plans**: `DevelopmentGoal` model + service APIs (list/upsert) with current→target proficiency tracking — same files as above.
+- [x] **Calibration**: `CalibrationRound` + `CalibrationEntry` model + service APIs (rounds, entries, proposed/calibrated ratings) — same files as above.
+- [x] Privacy: feedback visibility matrix tested; anonymous feedback cannot be de-anonymized by admins.
 
 Remaining (next R4 iterations):
-- [ ] ReviewCheckIn model + API (check-ins within capture window).
 - [ ] 360 feedback module with privacy visibility matrix.
-- [ ] Skills/competencies + gap views.
-- [ ] Development plans with measurable actions.
-- [ ] Calibration (proposed vs calibrated ratings, rationale, lock).
 
 ---
 
