@@ -38,16 +38,23 @@ from .domain import (
     DocumentCategory,
     EmployeeStatus,
     EmploymentType,
+    ExitType,
+    JourneyStatus,
+    JourneyTaskOwner,
+    JourneyTaskStatus,
+    JourneyType,
     LeaveStatus,
     NotificationKind,
     PayComponentType,
     PayrollFrequency,
     PayrollStatus,
     Role,
+    SeparationStatus,
     StatutoryRuleType,
     TaxRegime,
     TimesheetStatus,
     JobStatus,
+    CheckInStatus,
 )
 
 
@@ -272,6 +279,10 @@ class Employee(TimestampMixin, Base):
     documents: Mapped[list["Document"]] = relationship(
         back_populates="employee", cascade="all, delete-orphan", passive_deletes=True
     )
+    separation: Mapped["Separation | None"] = relationship(
+        back_populates="employee", lazy="selectin", uselist=False
+    )
+    journey: Mapped["Journey | None"] = relationship(lazy="selectin", uselist=False)
 
     @property
     def full_name(self) -> str:
@@ -348,6 +359,204 @@ class ChangeRequest(Base):
     )
 
     employee: Mapped[Employee] = relationship(lazy="selectin")
+
+
+
+# ============================================================
+# Lifecycle Journey Models (R4 Talent)
+# ============================================================
+
+
+class JourneyType(StrEnum):
+    ONBOARDING = "onboarding"
+    OFFBOARDING = "offboarding"
+    CROSSBOARDING = "crossboarding"
+    PROBATION = "probation"
+
+    @property
+    def label(self) -> str:
+        return {
+            "onboarding": "Onboarding",
+            "offboarding": "Offboarding",
+            "crossboarding": "Crossboarding",
+            "probation": "Probation",
+        }[self.value]
+
+
+class JourneyStatus(StrEnum):
+    DRAFT = "draft"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class JourneyTaskOwner(StrEnum):
+    HR = "hr"
+    MANAGER = "manager"
+    IT = "it"
+    EMPLOYEE = "employee"
+    BUDDY = "buddy"
+    FINANCE = "finance"
+
+    @property
+    def label(self) -> str:
+        return {
+            "hr": "HR",
+            "manager": "Manager",
+            "it": "IT",
+            "employee": "Employee",
+            "buddy": "Buddy",
+            "finance": "Finance",
+        }[self.value]
+
+
+class JourneyTaskStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
+class ExitType(StrEnum):
+    RESIGNATION = "resignation"
+    TERMINATION = "termination"
+    END_OF_CONTRACT = "end_of_contract"
+    RETIREMENT = "retirement"
+    MUTUAL_AGREEMENT = "mutual_agreement"
+
+    @property
+    def label(self) -> str:
+        return {
+            "resignation": "Resignation",
+            "termination": "Termination",
+            "end_of_contract": "End of fixed-term contract",
+            "retirement": "Retirement",
+            "mutual_agreement": "Mutual agreement",
+        }[self.value]
+
+
+class SeparationStatus(StrEnum):
+    INITIATED = "initiated"
+    NOTICE = "notice"
+    CLEARANCE = "clearance"
+    FINAL_PAY = "final_pay"
+    EXITED = "exited"
+    WITHDRAWN = "withdrawn"
+
+
+class Journey(Base):
+    """Represents a lifecycle journey for an employee."""
+    
+    __tablename__ = "journeys"
+    
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id: Mapped[UUID] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_id: Mapped[UUID] = mapped_column(ForeignKey("journey_templates.id", ondelete="RESTRICT"), nullable=False)
+    journey_type: Mapped[JourneyType] = mapped_column(enum_col(JourneyType), nullable=False)
+    status: Mapped[JourneyStatus] = mapped_column(enum_col(JourneyStatus), default=JourneyStatus.DRAFT, nullable=False)
+    anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    
+    template: Mapped["JourneyTemplate"] = relationship(back_populates="journeys", lazy="selectin")
+    tasks: Mapped[list["JourneyTask"]] = relationship(back_populates="journey", cascade="all, delete-orphan")
+    
+    def __repr__(self) -> str:
+        return f"<Journey {self.id} for {self.employee_id} ({self.journey_type.value})>"
+
+
+class JourneyTask(Base):
+    """Represents an individual task within a journey."""
+    
+    __tablename__ = "journey_tasks"
+    
+    id: Mapped[UUID] = uuid_pk()
+    journey_id: Mapped[UUID] = mapped_column(ForeignKey("journeys.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    owner_role: Mapped[JourneyTaskOwner] = mapped_column(enum_col(JourneyTaskOwner), nullable=False)
+    offset_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[JourneyTaskStatus] = mapped_column(enum_col(JourneyTaskStatus), default=JourneyTaskStatus.PENDING)
+    due_on: Mapped[date] = mapped_column(Date)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    assignee_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    
+    journey: Mapped["Journey"] = relationship(back_populates="tasks", lazy="joined")
+    
+    def __repr__(self) -> str:
+        return f"<JourneyTask {self.id} for {self.journey_id} ({self.name})>"
+
+
+class JourneyTemplate(Base):
+    """Represents a template for creating a journey."""
+    
+    __tablename__ = "journey_templates"
+    
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    journey_type: Mapped[JourneyType] = mapped_column(enum_col(JourneyType), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    journeys: Mapped[list["Journey"]] = relationship(back_populates="template", lazy="selectin")
+    
+    def __repr__(self) -> str:
+        return f"<JourneyTemplate {self.id} ({self.code})>"
+
+
+class JourneyTemplateTask(Base):
+    """Represents a task within a journey template."""
+    
+    __tablename__ = "journey_template_tasks"
+    
+    id: Mapped[UUID] = uuid_pk()
+    template_id: Mapped[UUID] = mapped_column(ForeignKey("journey_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    owner_role: Mapped[JourneyTaskOwner] = mapped_column(enum_col(JourneyTaskOwner), nullable=False)
+    offset_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    
+    @property
+    def journey_type(self) -> JourneyType:
+        return self.template.journey_type
+    
+    def __repr__(self) -> str:
+        return f"<JourneyTemplateTask {self.id} for {self.template_id} ({self.name})>"
+
+
+class Separation(Base):
+    """Represents an offboarding case."""
+    
+    __tablename__ = "separations"
+    
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id: Mapped[UUID] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    journey_id: Mapped[UUID | None] = mapped_column(ForeignKey("journeys.id", ondelete="SET NULL"), nullable=True)
+    exit_type: Mapped[ExitType] = mapped_column(enum_col(ExitType), nullable=False)
+    status: Mapped[SeparationStatus] = mapped_column(enum_col(SeparationStatus), default=SeparationStatus.INITIATED, nullable=False)
+    notice_date: Mapped[date] = mapped_column(Date)
+    last_working_day: Mapped[date] = mapped_column(Date, nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rehire_eligible: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    
+    employee: Mapped["Employee"] = relationship(back_populates="separation", lazy="selectin", uselist=False)
+    journey: Mapped["Journey"] = relationship(lazy="selectin")
+    
+    def __repr__(self) -> str:
+        return f"<Separation {self.id} for {self.employee_id} ({self.exit_type.value})>"
 
 
 
