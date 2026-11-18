@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET = "dev-only-change-me"
 DEFAULT_ADMIN_PASSWORD = "ChangeMe123!"
+VERSION = "2.1.0"
 
 
 class Settings(BaseSettings):
