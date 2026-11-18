@@ -45,6 +45,7 @@ from ..schemas import (
     UserOut,
 )
 from ..services import audit
+from ..services import lifecycle as lifecycle_service
 from ..services.auth import change_password
 from ..services.documents import (
     acknowledge_document,
@@ -1605,3 +1606,188 @@ def api_review_cycle_detail(
 ):
     cycle = talent_service.get_cycle(db, org_id=user.org_id, cycle_code=cycle_code)
     return cycle
+
+
+# --- Goals / OKRs ---
+
+
+@router.post("/goals", status_code=201)
+def api_goal_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    code = str(payload.get("code") or "").strip().upper()
+    title = str(payload.get("title") or "").strip()
+    objective = str(payload.get("objective") or "").strip()
+    employee_id = payload.get("employee_id")
+    due_date = payload.get("due_date")
+    if not code or not title or not objective:
+        raise ValidationError("code, title, objective are required")
+    due = date.fromisoformat(str(due_date)) if due_date else None
+    return talent_service.create_goal(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        employee_id=employee_id,
+        code=code,
+        title=title,
+        objective=objective,
+        due_date=due,
+    )
+
+
+@router.get("/goals", response_model=list[dict])
+def api_goals_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_goals(db, org_id=user.org_id, user=user)
+
+
+@router.get("/goals/{goal_id}", response_model=dict)
+def api_goal_detail(
+    goal_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.get_goal(db, org_id=user.org_id, goal_id=goal_id)
+
+
+@router.post("/goals/{goal_id}/progress", status_code=200)
+def api_goal_progress(
+    goal_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    progress = payload.get("progress")
+    note = payload.get("note")
+    if progress is None:
+        raise ValidationError("progress is required")
+    try:
+        progress_val = float(progress)
+    except (TypeError, ValueError):
+        raise ValidationError("progress must be a number")
+    return talent_service.update_goal_progress(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        goal_id=goal_id,
+        progress=progress_val,
+        note=note,
+    )
+
+
+@router.get("/goals/{goal_id}/progress", response_model=list[dict])
+def api_goal_progress_history(
+    goal_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_goal_progress(db, org_id=user.org_id, goal_id=goal_id)
+
+
+# --- Lifecycle change requests (R5 candidate) ---
+
+
+@router.post("/lifecycle", status_code=201)
+def api_lifecycle_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    code = str(payload.get("code") or "").strip().upper()
+    change_type = payload.get("change_type")
+    description = payload.get("description")
+    old_value = payload.get("old_value")
+    new_value = payload.get("new_value")
+    notes = payload.get("notes")
+    effective_date = payload.get("effective_date")
+    employee_id = payload.get("employee_id")
+
+    if not code:
+        raise ValidationError("code is required")
+    if not change_type:
+        raise ValidationError("change_type is required")
+
+    return lifecycle_service.create_change_request(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        code=code,
+        change_type=change_type,
+        employee_id=employee_id,
+        effective_date=effective_date,
+        description=description,
+        old_value=old_value,
+        new_value=new_value,
+        notes=notes,
+    )
+
+
+@router.get("/lifecycle", response_model=list[dict])
+def api_lifecycle_list(
+    status: str | None = Query(None),
+    change_type: str | None = Query(None),
+    employee_id: UUID | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return lifecycle_service.list_change_requests(
+        db,
+        org_id=user.org_id,
+        user=user,
+        status=status,
+        change_type=change_type,
+        employee_id=employee_id,
+    )
+
+
+@router.get("/lifecycle/{request_id}", response_model=dict)
+def api_lifecycle_get(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return lifecycle_service.get_change_request(
+        db, org_id=user.org_id, cr_id=str(request_id)
+    )
+
+
+@router.post("/lifecycle/{request_id}/approve", response_model=dict)
+def api_lifecycle_approve(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return lifecycle_service.approve_change_request(
+        db, org_id=user.org_id, actor=user, cr_id=str(request_id)
+    )
+
+
+@router.post("/lifecycle/{request_id}/reject", response_model=dict)
+def api_lifecycle_reject(
+    request_id: UUID,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    reason = payload.get("reason")
+    return lifecycle_service.reject_change_request(
+        db, org_id=user.org_id, actor=user, cr_id=str(request_id), reason=reason
+    )
+
+
+@router.post("/lifecycle/{request_id}/cancel", response_model=dict)
+def api_lifecycle_cancel(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return lifecycle_service.cancel_change_request(
+        db, org_id=user.org_id, actor=user, cr_id=str(request_id)
+    )

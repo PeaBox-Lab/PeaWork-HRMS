@@ -174,3 +174,217 @@ def get_cycle(db: Session, org_id, cycle_code) -> dict:
         "end_date": cycle.end_date.isoformat(),
         "status": cycle.status,
     }
+
+
+# ---- Goal / OKR functions ----
+
+
+def create_goal(
+    db: Session,
+    *,
+    org_id,
+    actor,
+    employee_id: str | None,
+    code: str,
+    title: str,
+    objective: str,
+    due_date: date | None = None,
+) -> dict:
+    """Create a goal / OKR.
+
+    ``code`` must be unique per organisation (if supplied).
+    ``objective`` defines the team/org level statement.
+    ``employee_id`` may be ``None`` for org-wide goals.
+    """
+    from ..models import Goal
+
+    if employee_id is None:
+        # Org-wide goal; treat as no employee
+        employee_id = None
+
+    existing = db.scalar(
+        select(Goal).where(Goal.org_id == org_id, Goal.code == code)
+    )
+    if existing is not None:
+        raise ValidationError(f"Goal with code '{code}' already exists.")
+
+    goal = Goal(
+        org_id=org_id,
+        employee_id=employee_id,
+        code=code,
+        title=title,
+        objective=objective,
+        due_date=due_date,
+        owner_user_id=actor.id,
+        created_by=actor.id,
+    )
+    db.add(goal)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=actor,
+        action="create",
+        entity_type="goal",
+        entity_id=goal.id,
+        details={"code": code, "title": title, "employee_id": employee_id},
+        org_id=org_id,
+    )
+    return {"id": str(goal.id), "code": code, "title": title, "status": "open"}
+
+
+def list_goals(db: Session, *, org_id, user) -> list[dict]:
+    """Return goals visible to *user* in *org_id*.
+
+    Administrators/HR see all org goals; managers see theirs and their
+    reports’; employees see only their own goals.
+    """
+    from ..models import Goal
+
+    stmt = select(Goal).where(Goal.org_id == org_id)
+
+    if user.role in {"admin", "hr"}:
+        pass  # org-wide view
+    elif user.role == "manager":
+        # managers see their goals and goals of employees they manage
+        # simplify for R4: just show goals where employee_id is in reports
+        from ..models import Employee
+        manager_emp_id = user.employee_id
+        if manager_emp_id:
+            stmt = stmt.where(
+                (Goal.employee_id == manager_emp_id) |
+                (Goal.employee_id.in_(
+                    select(Employee.id).where(Employee.manager_id == manager_emp_id)
+                ))
+            )
+    elif user.employee_id:
+        # employee sees only own goals (null employee_id for org-wide)
+        stmt = stmt.where((Goal.employee_id == user.employee_id) | (Goal.employee_id.is_(None)))
+    else:
+        return []
+
+    goals = db.scalars(stmt.order_by(Goal.created_at.desc())).all()
+    return [
+        {
+            "id": str(g.id),
+            "code": g.code,
+            "title": g.title,
+            "objective": g.objective,
+            "employee_id": str(g.employee_id) if g.employee_id else None,
+            "status": g.status,
+            "progress": float(g.progress),
+            "weight": float(g.weight),
+            "due_date": g.due_date.isoformat() if g.due_date else None,
+        }
+        for g in goals
+    ]
+
+
+def get_goal(db: Session, org_id, goal_id: str) -> dict:
+    """Return goal details as a dict."""
+    from ..models import Goal
+    from uuid import UUID
+
+    goal_id_uuid = UUID(goal_id)
+    goal = db.scalar(
+        select(Goal).where(Goal.org_id == org_id, Goal.id == goal_id_uuid)
+    )
+    if not goal:
+        raise ValidationError(f"Goal '{goal_id}' not found.")
+    return {
+        "id": str(goal.id),
+        "code": goal.code,
+        "title": goal.title,
+        "objective": goal.objective,
+        "employee_id": str(goal.employee_id) if goal.employee_id else None,
+        "review_cycle_id": str(goal.review_cycle_id) if goal.review_cycle_id else None,
+        "status": goal.status,
+        "progress": float(goal.progress),
+        "weight": float(goal.weight),
+        "due_date": goal.due_date.isoformat() if goal.due_date else None,
+        "created_at": goal.created_at.isoformat(),
+        "updated_at": goal.updated_at.isoformat(),
+    }
+
+
+def update_goal_progress(
+    db: Session,
+    *,
+    org_id,
+    actor,
+    goal_id: str,
+    progress: float,
+    note: str | None = None,
+) -> dict:
+    """Append-only progress update for a goal.
+
+    ``progress`` must be in ``[0.0, 1.0]``; each update creates a new row in
+    ``goal_progress`` and updates the goal's ``progress`` field.
+    """
+    from ..models import Goal, GoalProgress
+    from uuid import UUID
+
+    if not (0.0 <= progress <= 1.0):
+        raise ValidationError("progress must be between 0.0 and 1.0")
+
+    goal_id_uuid = UUID(goal_id)
+    goal = db.scalar(
+        select(Goal).where(Goal.org_id == org_id, Goal.id == goal_id_uuid)
+    )
+    if not goal:
+        raise ValidationError(f"Goal '{goal_id}' not found.")
+
+    # Record progress in the append-only history
+    gp = GoalProgress(
+        org_id=org_id,
+        goal_id=goal.id,
+        progress=progress,
+        note=note,
+        actor_id=actor.id,
+    )
+    db.add(gp)
+    db.flush()
+
+    # Update goal's progress (the last known value)
+    goal.progress = progress
+    if progress >= 1.0:
+        goal.status = "achieved"
+    elif progress <= 0.25:
+        goal.status = "open"
+    db.add(goal)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=actor,
+        action="update",
+        entity_type="goal_progress",
+        entity_id=gp.id,
+        details={"goal_id": str(goal.id), "progress": progress, "note": note},
+        org_id=org_id,
+    )
+    return {"id": str(goal.id), "progress": progress, "status": goal.status}
+
+
+def list_goal_progress(db: Session, *, org_id, goal_id: str) -> list[dict]:
+    """Return the progress history for a goal."""
+    from ..models import GoalProgress
+    from uuid import UUID
+
+    goal_id_uuid = UUID(goal_id)
+    stmt = select(GoalProgress).where(
+        GoalProgress.org_id == org_id,
+        GoalProgress.goal_id == goal_id_uuid,
+    ).order_by(GoalProgress.created_at.desc())
+
+    rows = db.scalars(stmt).all()
+    return [
+        {
+            "id": str(r.id),
+            "progress": float(r.progress),
+            "note": r.note,
+            "actor_id": str(r.actor_id) if r.actor_id else None,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]

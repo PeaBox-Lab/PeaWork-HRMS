@@ -159,3 +159,32 @@ class StatutoryRuleType(StrEnum):
     ESI = "esi"
     PT = "pt"
     TDS = "tds"
+
+
+class ChangeRequestStatus(StrEnum):
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
+
+
+class ChangeRequestType(StrEnum):
+    RESIGNATION = "resignation"
+    PROMOTION = "promotion"
+    POSITION_CHANGE = "position_change"  # location, department, etc.
+    LOCATION_CHANGE = "location_change"  # office relocation, remote/hybrid change
+    MANAGER_CHANGE = "manager_change"
+    EMPLOYMENT_TYPE_CHANGE = "employment_type_change"
+    CONTRACT_CHANGE = "contract_change"
+    REHIRE = "rehire"
+    GROUP_COMPANY_TRANSFER = "group_company_transfer"
+    COUNTRY_TRANSFER = "country_transfer"
+    LEGAL_ENTITY_CHANGE = "legal_entity_change"
+    PROJECT_ASSIGNMENT = "project_assignment"
+    COST_CENTER_CHANGE = "cost_center_change"
+    TIMESHEET_ADJUSTMENT = "timesheet_adjustment"
+    LEAVE_REQUEST = "leave_request"  # special case, handled elsewhere
+    ATTENDANCE_ADJUSTMENT = "attendance_adjustment"  # special case
+    OTHER = "other"

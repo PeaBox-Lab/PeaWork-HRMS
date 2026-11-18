@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from .domain import (
     AttendanceStatus,
+    ChangeRequestStatus,
+    ChangeRequestType,
     DocumentCategory,
     EmployeeStatus,
     EmploymentType,
@@ -445,3 +447,46 @@ class StatutoryRuleVersionUpdate(BaseModel):
     rates: dict | None = None
     active: bool | None = None
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class ChangeRequestCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+    change_type: ChangeRequestType
+    employee_id: UUID | None = None
+    effective_date: date | None = None
+    description: str | None = Field(default=None, max_length=2000)
+    old_value: str | None = Field(default=None, max_length=4000)
+    new_value: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("code")
+    @classmethod
+    def upper_code(cls, value: str) -> str:
+        return value.strip().upper()
+
+
+class ChangeRequestOut(ORMModel):
+    id: UUID
+    org_id: UUID
+    code: str
+    employee_id: UUID | None
+    change_type: ChangeRequestType
+    status: ChangeRequestStatus
+    effective_date: date
+    description: str | None
+    old_value: str | None
+    new_value: str | None
+    notes: str | None
+    reason: str | None
+    actor_id: UUID | None
+    approved_by: UUID | None
+    approved_at: datetime | None
+    created_at: datetime
+
+
+class ChangeRequestUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=2000)
+    old_value: str | None = Field(default=None, max_length=4000)
+    new_value: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)

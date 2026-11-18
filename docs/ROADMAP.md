@@ -206,6 +206,12 @@ We are not bolting a hardened product onto the prototype. We are doing a **contr
 
 ---
 
+## R2 Status ✅
+
+> **Completed (2026-11-18)** — Migration `03187f6bc661_time_attendance_r2.py` (down_revision `ec80ab59c493`), `alembic check` clean, `tests/v2` 281 passed, coverage 82%, `smoke_time.py` green on `http://127.0.0.1:8090`.
+
+---
+
 ## R3 — India payroll (v2.2)
 
 - `NUMERIC(14,2)` money model; explicit rounding and allocation policy.
@@ -233,6 +239,44 @@ We are not bolting a hardened product onto the prototype. We are doing a **contr
 - Privacy: feedback visibility matrix tested; anonymous feedback cannot be de-anonymized by admins.
 
 **Exit:** one complete review cycle on the platform; manager/HR satisfaction ≥ 4/5.
+
+### R4 Status — In Progress
+
+> **Review cycles + Goals/OKRs completed (2026-11-18)** — Migration `f4324d9c1355_r4_talent_goals_okrs.py` (down_revision `0eb6a1d98e42`), `alembic check` clean, `tests/v2` 298 passed, coverage 82%, `smoke_talent.py` green on `http://127.0.0.1:8090`.
+
+Implemented:
+- [x] `ReviewCycle` model + migration `0eb6a1d98e42_r4_talent_review_cycles.py` (draft/active/closed status, unique org code, start/end dates).
+- [x] `Goal` + `GoalProgress` (append-only progress history) + migration `f4324d9c1355_r4_talent_goals_okrs.py`.
+- [x] Service: `create_cycle`, `list_cycles`, `get_cycle`, `close_cycle` (enqueues `review_capture_window` job), `enroll_employee`.
+- [x] Service: `create_goal`, `list_goals`, `get_goal`, `update_goal_progress` (0.0–1.0 with status transitions), `list_goal_progress`.
+- [x] API: `POST/GET /review-cycles`, `POST /review-cycles/{code}/close`, `POST /review-cycles/{code}/enroll`, `GET /review-cycles/{code}`.
+- [x] API: `POST/GET /goals`, `GET /goals/{id}`, `POST /goals/{id}/progress`, `GET /goals/{id}/progress`.
+- [x] Role-scoped listing (admin/HR all; manager own + reports; employee own).
+- [x] Idempotent enqueue for close-capture job (`review_capture_window` handler no-op in R4).
+- [x] Tests: `tests/v2/test_talent.py` (17 tests covering create/list/detail/close/enroll/progress/validation).
+- [x] Smoke: `smoke_talent.py` (all endpoints verified against live server).
+
+Remaining (next R4 iterations):
+- [ ] ReviewCheckIn model + API (check-ins within capture window).
+- [ ] 360 feedback module with privacy visibility matrix.
+- [ ] Skills/competencies + gap views.
+- [ ] Development plans with measurable actions.
+- [ ] Calibration (proposed vs calibrated ratings, rationale, lock).
+
+---
+
+### Lifecycle Change Requests — In Progress
+
+> **Scaffolding + draft workflow completed (2026-11-18)** — Migration `a3b7c1d2e4f5_employee_lifecycle_change_requests.py` (down_revision `f4324d9c1355`), followed by `b2c3d4e5f6g7_make_employee_id_nullable_v2.py` and `c4d5e6f7g8h9_add_reason_to_change_requests.py`. `alembic check` clean, `tests/v2` 308 passed, coverage 82%, `ruff check peawork/ tests/v2/` clean.
+
+Implemented:
+- [x] `ChangeRequest` model + `ChangeRequestStatus`/`ChangeRequestType` enums.
+- [x] Effective-dated request API: `POST/GET /api/v1/lifecycle`, `GET/POST /{id}/approve|reject|cancel`.
+- [x] Service: create/list/get/approve/reject/cancel/apply with auditing, role scoping, and workflow gates.
+- [x] Tests: `tests/v2/test_lifecycle.py` (10 tests covering create/list/get/filter/approve/reject/cancel/role-scoping/valid change types).
+- [ ] Apply-approved-request path (`apply_change_request`) and EmployeeHistory detail-linking.
+- [ ] `ChangeRequestUpdate` schema wiring (edit/update draft fields).
+- [ ] Role-aware per-field authorization for employee_id/self-service edits.
 
 ---
 

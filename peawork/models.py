@@ -31,6 +31,8 @@ from .domain import (
     AuditAction,
     BankAccountType,
     BenefitType,
+    ChangeRequestType,
+    ChangeRequestStatus,
     DocumentCategory,
     EmployeeStatus,
     EmploymentType,
@@ -286,6 +288,62 @@ class EmployeeHistory(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ChangeRequest(Base):
+    """
+    Effective-dated employee lifecycle change request.
+    
+    Examples: resignation, promotion, manager change, location change,
+    employment-type change, contract change, rehire, group-company transfer,
+    country transfer, legal-entity change, project assignment, cost-center change.
+    
+    Workflow: draft → pending_approval → approved/rejected/cancelled.
+    On approval, the change is applied to the employee record (effective_date) and
+    an EmployeeHistory row is created with a matching change_type.
+    """
+
+    __tablename__ = "change_requests"
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_change_requests_org_code"),
+        Index("ix_change_requests_org_status", "org_id", "status"),
+        Index("ix_change_requests_employee", "employee_id"),
+        Index("ix_change_requests_org_type", "org_id", "change_type"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    employee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=True
+    )
+    change_type: Mapped[ChangeRequestType] = mapped_column(
+        enum_col(ChangeRequestType), nullable=False
+    )
+    status: Mapped[ChangeRequestStatus] = mapped_column(
+        enum_col(ChangeRequestStatus), default=ChangeRequestStatus.DRAFT, nullable=False
+    )
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    old_value: Mapped[str | None] = mapped_column(Text)
+    new_value: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    actor_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+    employee: Mapped[Employee] = relationship(lazy="selectin")
+
 
 
 class LeaveType(TimestampMixin, Base):
@@ -1021,6 +1079,73 @@ class ReviewCycle(TimestampMixin, Base):
     )
 
 
+class Goal(TimestampMixin, Base):
+    """An OKR-style goal assigned to an employee (or created org-wide).
+
+    ``objective`` is the team/org level statement; ``key_results`` are the
+    weighted measurable outcomes (weight fractions summing to ~1.0).
+    Progress is append-only via ``GoalProgress`` rows (never update-in-place).
+    """
+
+    __tablename__ = "goals"
+    __table_args__ = (
+        Index("ix_goals_org_employee", "org_id", "employee_id"),
+        Index("ix_goals_org_status", "org_id", "status"),
+        UniqueConstraint("org_id", "code", name="uq_goals_org_code"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    review_cycle_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("review_cycles.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    objective: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)  # open / achieved / missed
+    owner_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    weight: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.0"), nullable=False)
+    progress: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0"), nullable=False)  # 0.0000-1.0000
+    due_date: Mapped[date | None] = mapped_column(Date)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_goals_org_code"),
+    )
+
+
+class GoalProgress(Base):
+    """Append-only progress history for a goal.
+
+    Each update is an immutable row: previous ``progress`` snapshots remain
+    available (audit trail); ``progress`` is the latest value.
+    """
+
+    __tablename__ = "goal_progress"
+    __table_args__ = (
+        Index("ix_goal_progress_goal", "goal_id"),
+        Index("ix_goal_progress_org_created", "org_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    goal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("goals.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    progress: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)  # 0.0000-1.0000
+    note: Mapped[str | None] = mapped_column(Text)
+    actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 __all__ = [
     "WorkSchedule",
     "BiometricDevice",
@@ -1069,6 +1194,8 @@ __all__ = [
     "PayrollFrequency",
     "PayrollStatus",
     "ReviewCycle",
+    "Goal",
+    "GoalProgress",
     "StatutoryRuleType",
     "TaxRegime",
     "BenefitType",
