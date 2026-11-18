@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ type_label }} — PeaWork HRMS{% endblock %}
+{% block heading %}Lifecycle{% endblock %}
+{% block subheading %}{{ type_label }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ type_label }}</h1>
+    <p>Checklists with an owner and a due date, anchored to the employee's start date.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/job-changes">Job changes</a>
+    <a class="btn btn--ghost" href="/offboarding">Offboarding</a>
+    <a class="btn btn--ghost" href="/lifecycle">All requests</a>
+  </div>
+</div>
+
+<div class="grid grid--3">
+  <div class="card stat">
+    <span class="stat__label">In progress</span>
+    <span class="stat__value">{{ open_count }}</span>
+    <span class="stat__hint">Active journeys</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Overdue tasks</span>
+    <span class="stat__value">{{ overdue_count }}</span>
+    <span class="stat__hint">Past their due date</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Completed</span>
+    <span class="stat__value">{{ done_count }}</span>
+    <span class="stat__hint">Checklists closed</span>
+  </div>
+</div>
+
+<div class="grid grid--main section">
+  <div class="card">
+    <div class="card__header">
+      <h2>{{ type_label }} journeys</h2>
+      <span class="spacer"></span>
+      <span class="muted small">{{ rows|length }} shown</span>
+    </div>
+    {% if rows %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Employee</th><th>Anchor date</th><th>Progress</th><th>Open / overdue</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                <a href="/onboarding/{{ row.id }}"><strong>{{ row.employee_name }}</strong></a><br>
+                <small class="muted">{{ row.employee_no }}</small>
+              </td>
+              <td class="nowrap">{{ row.anchor_date|date }}</td>
+              <td class="nowrap">
+                {% set done = row.tasks|length - row.open_tasks|length %}
+                {{ done }}/{{ row.tasks|length }} tasks
+              </td>
+              <td class="nowrap">
+                {{ row.open_tasks|length }} open
+                {% if row.overdue_tasks %}<br><span class="badge badge--rejected">{{ row.overdue_tasks|length }} overdue</span>{% endif %}
+              </td>
+              <td><span class="badge badge--{{ row.status }}">{{ row.status_label }}</span></td>
+              <td class="right"><a class="btn btn--ghost btn--sm" href="/onboarding/{{ row.id }}">Open checklist</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">
+        <strong>No onboarding journeys yet</strong>
+        {% if is_hr %}Start one from the panel on the right.{% else %}HR will start a journey when a new joiner is confirmed.{% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    {% if is_hr %}
+      <div class="card">
+        <div class="card__header"><h2>Start onboarding</h2></div>
+        <form method="post" action="/onboarding/start">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="employee_id">Employee</label>
+            <select id="employee_id" name="employee_id" required>
+              <option value="">Choose an employee</option>
+              {% for emp in employees %}
+                <option value="{{ emp.id }}">{{ emp.full_name }} ({{ emp.employee_no }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="anchor_date">Start date</label>
+            <input id="anchor_date" name="anchor_date" type="date" value="{{ today }}" required>
+          </div>
+          <div class="field">
+            <label for="notes">Notes</label>
+            <textarea id="notes" name="notes" rows="2" placeholder="Buddy, team, special arrangements"></textarea>
+          </div>
+          <button class="btn" type="submit" style="width: 100%;">Start onboarding</button>
+        </form>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>Default checklist</h3></div>
+      <p class="muted small">Preboarding documents, IT setup, manager plan and a first-week check-in. Each task is owned by HR, IT, the manager or the employee.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

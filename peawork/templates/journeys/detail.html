@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ type_label }} checklist — PeaWork HRMS{% endblock %}
+{% block heading %}Lifecycle{% endblock %}
+{% block subheading %}{{ type_label }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ journey.employee_name }} <span class="badge badge--{{ journey.status }}">{{ journey.status_label }}</span></h1>
+    <p>{{ type_label }} checklist · starts/ends {{ journey.anchor_date|date }}</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/{{ journey.journey_type }}">All {{ type_label|lower }}</a>
+    {% if is_hr and journey.status == 'in_progress' %}
+      <form method="post" action="/{{ journey.journey_type }}/{{ journey.id }}/complete" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn" type="submit">Close checklist</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid grid--main">
+  <div class="card">
+    <div class="card__header">
+      <h2>Tasks</h2>
+      <span class="spacer"></span>
+      <span class="muted small">{{ journey.tasks|length - journey.open_tasks|length }}/{{ journey.tasks|length }} done</span>
+    </div>
+    {% if journey.tasks %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for task in journey.tasks %}
+            <tr>
+              <td>
+                <strong>{{ task.name }}</strong>
+                {% if task.required %}<small class="muted"> · required</small>{% endif %}
+                {% if task.notes %}<br><small class="muted">{{ task.notes }}</small>{% endif %}
+              </td>
+              <td>{{ task.owner_label }}</td>
+              <td class="nowrap">{{ task.due_on|date if task.due_on else '—' }}</td>
+              <td>
+                <span class="badge badge--{{ 'approved' if task.status == 'done' else task.status }}">{{ task.status_label }}</span>
+              </td>
+              <td class="right nowrap">
+                {% if task.status not in ('done', 'skipped') %}
+                  <form method="post" action="/{{ journey.journey_type }}/{{ journey.id }}/tasks/{{ task.id }}/complete" class="inline-form">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button class="btn btn--sm" type="submit">Complete</button>
+                  </form>
+                  {% if is_hr %}
+                    <form method="post" action="/{{ journey.journey_type }}/{{ journey.id }}/tasks/{{ task.id }}/skip" class="inline-form">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                      <button class="btn btn--ghost btn--sm" type="submit">Skip</button>
+                    </form>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">This checklist has no tasks.</div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h3>Summary</h3></div>
+      <dl class="meta">
+        <dt>Employee</dt><dd>{{ journey.employee_name }} ({{ journey.employee_no }})</dd>
+        <dt>Type</dt><dd>{{ journey.journey_type_label }}</dd>
+        <dt>Anchor date</dt><dd>{{ journey.anchor_date|date }}</dd>
+        <dt>Open tasks</dt><dd>{{ journey.open_tasks|length }}</dd>
+        <dt>Overdue</dt><dd>{{ journey.overdue_tasks|length }}</dd>
+      </dl>
+      {% if journey.notes %}<p class="muted small">{{ journey.notes }}</p>{% endif %}
+    </div>
+    <div class="card">
+      <div class="card__header"><h3>Who completes what</h3></div>
+      <p class="muted small">HR can complete or skip any task. Otherwise the task owner (the employee, their manager, IT or finance) closes their own item. Closing the checklist requires every required task to be done or skipped.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

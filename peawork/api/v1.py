@@ -75,6 +75,8 @@ from ..services import jobs as jobs_service
 from ..services import payroll as payroll_service
 from ..services import timesheets as timesheets_service
 from ..services import talent as talent_service
+from ..services import job_change as job_change_service
+from ..services import journeys as journey_service
 from ..services.errors import BulkImportError
 from ..security import new_token, password_problems, verify_password
 
@@ -1690,6 +1692,504 @@ def api_goal_progress_history(
     return talent_service.list_goal_progress(db, org_id=user.org_id, goal_id=goal_id)
 
 
+# --- Talent: check-ins ---
+
+
+@router.post("/check-ins", status_code=201)
+def api_check_in_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    cycle_code = payload.get("cycle_code")
+    employee_id = payload.get("employee_id")
+    due_on = payload.get("due_on")
+    if not cycle_code or not employee_id:
+        raise ValidationError("cycle_code and employee_id are required")
+    due = date.fromisoformat(str(due_on)) if due_on else None
+    return talent_service.create_check_in(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        cycle_code=str(cycle_code),
+        employee_id=str(employee_id),
+        due_on=due,
+    )
+
+
+@router.get("/check-ins", response_model=list[dict])
+def api_check_ins_list(
+    cycle_code: str | None = Query(None),
+    status: str | None = Query(None, pattern="^(pending|submitted|skipped)$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_check_ins(
+        db, org_id=user.org_id, user=user, cycle_code=cycle_code, status=status
+    )
+
+
+@router.get("/check-ins/{check_in_id}", response_model=dict)
+def api_check_in_detail(
+    check_in_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.get_check_in(
+        db, org_id=user.org_id, user=user, check_in_id=check_in_id
+    )
+
+
+@router.post("/check-ins/{check_in_id}/submit", response_model=dict)
+def api_check_in_submit(
+    check_in_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.submit_check_in(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        check_in_id=check_in_id,
+        employee_notes=payload.get("employee_notes"),
+        manager_notes=payload.get("manager_notes"),
+        rating=payload.get("rating"),
+    )
+
+
+# --- Talent: 360 feedback ---
+
+
+@router.post("/feedback-requests", status_code=201)
+def api_feedback_request_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    subject_employee_id = payload.get("subject_employee_id")
+    if not subject_employee_id:
+        raise ValidationError("subject_employee_id is required")
+    due_on = payload.get("due_on")
+    due = date.fromisoformat(str(due_on)) if due_on else None
+    return talent_service.create_feedback_request(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        subject_employee_id=str(subject_employee_id),
+        reviewer_employee_id=payload.get("reviewer_employee_id"),
+        cycle_code=payload.get("cycle_code"),
+        relationship=str(payload.get("relationship") or "peer"),
+        anonymous=bool(payload.get("anonymous", False)),
+        due_on=due,
+    )
+
+
+@router.get("/feedback-requests", response_model=list[dict])
+def api_feedback_inbox(
+    status: str | None = Query(None, pattern="^(pending|submitted|declined)$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_my_feedback_requests(
+        db, org_id=user.org_id, actor=user, status=status
+    )
+
+
+@router.post("/feedback-requests/{request_id}/submit", response_model=dict)
+def api_feedback_submit(
+    request_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.submit_feedback(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        request_id=request_id,
+        strengths=payload.get("strengths"),
+        improvements=payload.get("improvements"),
+        comments=payload.get("comments"),
+        rating=payload.get("rating"),
+    )
+
+
+@router.post("/feedback-requests/{request_id}/decline", response_model=dict)
+def api_feedback_decline(
+    request_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.decline_feedback(
+        db, org_id=user.org_id, actor=user, request_id=request_id
+    )
+
+
+@router.get("/feedback/{employee_id}", response_model=list[dict])
+def api_feedback_for_employee(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return talent_service.list_feedback_for_employee(
+        db, org_id=user.org_id, actor=user, employee_id=employee_id
+    )
+
+
+# --- Lifecycle: job changes (event + reason) ---
+
+
+@router.get("/job-changes/reasons", response_model=dict)
+def api_job_change_reasons(
+    event: str | None = Query(None),
+    user: User = Depends(require_user()),
+):
+    if event:
+        return {"event": event, "reasons": job_change_service.reason_options(event)}
+    return {
+        "events": job_change_service.event_options(),
+        "reasons": {
+            item.value: [
+                {"code": code, "label": label}
+                for code, label in job_change_service.EVENT_REASONS[item]
+            ]
+            for item in job_change_service.EVENT_REASONS
+        },
+    }
+
+
+@router.post("/job-changes", status_code=201)
+def api_job_change_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    employee_id = payload.get("employee_id")
+    event = payload.get("event")
+    reason_code = payload.get("reason_code")
+    effective = payload.get("effective_date")
+    if not employee_id or not event or not reason_code or not effective:
+        raise ValidationError(
+            "employee_id, event, reason_code and effective_date are required"
+        )
+    try:
+        effective_date = date.fromisoformat(str(effective))
+    except ValueError:
+        raise ValidationError("effective_date must be an ISO date (YYYY-MM-DD)")
+    return job_change_service.create_job_change(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        employee_id=str(employee_id),
+        event=str(event),
+        reason_code=str(reason_code),
+        effective_date=effective_date,
+        proposed=payload.get("proposed") or payload.get("details") or {},
+        notes=payload.get("notes"),
+    )
+
+
+@router.get("/job-changes", response_model=list[dict])
+def api_job_changes_list(
+    status: str | None = Query(None),
+    event: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return job_change_service.list_job_changes(
+        db, org_id=user.org_id, user=user, status=status, event=event
+    )
+
+
+@router.post("/job-changes/apply-due", response_model=list[dict])
+def api_job_changes_apply_due(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return job_change_service.apply_due_job_changes(db, org_id=user.org_id, actor=user)
+
+
+@router.get("/job-changes/{cr_id}", response_model=dict)
+def api_job_change_detail(
+    cr_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return job_change_service.get_job_change(
+        db, org_id=user.org_id, actor=user, cr_id=cr_id
+    )
+
+
+@router.post("/job-changes/{cr_id}/submit", response_model=dict)
+def api_job_change_submit(
+    cr_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return job_change_service.submit_job_change(
+        db, org_id=user.org_id, actor=user, cr_id=cr_id
+    )
+
+
+@router.post("/job-changes/{cr_id}/approve", response_model=dict)
+def api_job_change_approve(
+    cr_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return job_change_service.approve_job_change(
+        db, org_id=user.org_id, actor=user, cr_id=cr_id
+    )
+
+
+@router.post("/job-changes/{cr_id}/reject", response_model=dict)
+def api_job_change_reject(
+    cr_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return job_change_service.reject_job_change(
+        db, org_id=user.org_id, actor=user, cr_id=cr_id, reason=payload.get("reason")
+    )
+
+
+@router.post("/job-changes/{cr_id}/cancel", response_model=dict)
+def api_job_change_cancel(
+    cr_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return job_change_service.cancel_job_change(
+        db, org_id=user.org_id, actor=user, cr_id=cr_id
+    )
+
+
+# --- Lifecycle: journeys and offboarding ---
+
+
+@router.get("/journey-templates", response_model=list[dict])
+def api_journey_templates(
+    journey_type: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    rows = journey_service.list_templates(
+        db, org_id=user.org_id, journey_type=journey_type
+    )
+    return [
+        {
+            "id": str(row.id),
+            "code": row.code,
+            "name": row.name,
+            "journey_type": row.journey_type.value,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/journeys", status_code=201)
+def api_journey_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    employee_id = payload.get("employee_id")
+    journey_type = payload.get("journey_type")
+    anchor = payload.get("anchor_date")
+    if not employee_id or not journey_type or not anchor:
+        raise ValidationError("employee_id, journey_type and anchor_date are required")
+    try:
+        anchor_date = date.fromisoformat(str(anchor))
+    except ValueError:
+        raise ValidationError("anchor_date must be an ISO date (YYYY-MM-DD)")
+    return journey_service.start_journey(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        employee_id=str(employee_id),
+        journey_type=str(journey_type),
+        anchor_date=anchor_date,
+        template_id=payload.get("template_id"),
+        notes=payload.get("notes"),
+    )
+
+
+@router.get("/journeys", response_model=list[dict])
+def api_journeys_list(
+    journey_type: str | None = Query(None),
+    status: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return journey_service.list_journeys(
+        db,
+        org_id=user.org_id,
+        user=user,
+        journey_type=journey_type,
+        status=status,
+    )
+
+
+@router.get("/journeys/{journey_id}", response_model=dict)
+def api_journey_detail(
+    journey_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return journey_service.get_journey(
+        db, org_id=user.org_id, user=user, journey_id=journey_id
+    )
+
+
+@router.post("/journeys/{journey_id}/tasks/{task_id}/complete", response_model=dict)
+def api_journey_task_complete(
+    journey_id: str,
+    task_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return journey_service.complete_task(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        journey_id=journey_id,
+        task_id=task_id,
+        notes=payload.get("notes"),
+    )
+
+
+@router.post("/journeys/{journey_id}/tasks/{task_id}/skip", response_model=dict)
+def api_journey_task_skip(
+    journey_id: str,
+    task_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return journey_service.skip_task(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        journey_id=journey_id,
+        task_id=task_id,
+        reason=payload.get("reason"),
+    )
+
+
+@router.post("/journeys/{journey_id}/complete", response_model=dict)
+def api_journey_complete(
+    journey_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return journey_service.complete_journey(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        journey_id=journey_id,
+        force=bool(payload.get("force", False)),
+    )
+
+
+@router.post("/separations", status_code=201)
+def api_separation_create(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    employee_id = payload.get("employee_id")
+    exit_type = payload.get("exit_type")
+    last_working_day = payload.get("last_working_day")
+    if not employee_id or not exit_type or not last_working_day:
+        raise ValidationError("employee_id, exit_type and last_working_day are required")
+    try:
+        last_day = date.fromisoformat(str(last_working_day))
+        notice = (
+            date.fromisoformat(str(payload["notice_date"]))
+            if payload.get("notice_date")
+            else None
+        )
+    except ValueError:
+        raise ValidationError("Dates must be ISO dates (YYYY-MM-DD)")
+    return journey_service.create_separation(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        employee_id=str(employee_id),
+        exit_type=str(exit_type),
+        last_working_day=last_day,
+        notice_date=notice,
+        reason_code=payload.get("reason_code"),
+        rehire_eligible=bool(payload.get("rehire_eligible", True)),
+        notes=payload.get("notes"),
+    )
+
+
+@router.get("/separations", response_model=list[dict])
+def api_separations_list(
+    status: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return journey_service.list_separations(
+        db, org_id=user.org_id, user=user, status=status
+    )
+
+
+@router.get("/separations/{separation_id}", response_model=dict)
+def api_separation_detail(
+    separation_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return journey_service.get_separation(
+        db, org_id=user.org_id, user=user, separation_id=separation_id
+    )
+
+
+@router.post("/separations/{separation_id}/advance", response_model=dict)
+def api_separation_advance(
+    separation_id: str,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return journey_service.advance_separation(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        separation_id=separation_id,
+        status=payload.get("status"),
+        final_pay_ready=payload.get("final_pay_ready"),
+        exit_interview_done=payload.get("exit_interview_done"),
+        rehire_eligible=payload.get("rehire_eligible"),
+    )
+
+
 # --- Lifecycle change requests (R5 candidate) ---
 
 
@@ -1698,13 +2198,14 @@ def api_lifecycle_create(
     payload: dict,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+    user: User = Depends(require_user()),
 ):
     code = str(payload.get("code") or "").strip().upper()
     change_type = payload.get("change_type")
     description = payload.get("description")
     old_value = payload.get("old_value")
     new_value = payload.get("new_value")
+    details = payload.get("details")
     notes = payload.get("notes")
     effective_date = payload.get("effective_date")
     employee_id = payload.get("employee_id")
@@ -1725,6 +2226,7 @@ def api_lifecycle_create(
         description=description,
         old_value=old_value,
         new_value=new_value,
+        details=details,
         notes=notes,
     )
 
@@ -1734,6 +2236,8 @@ def api_lifecycle_list(
     status: str | None = Query(None),
     change_type: str | None = Query(None),
     employee_id: UUID | None = Query(None),
+    limit: int | None = Query(None, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(require_user()),
 ):
@@ -1744,6 +2248,8 @@ def api_lifecycle_list(
         status=status,
         change_type=change_type,
         employee_id=employee_id,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -1754,7 +2260,7 @@ def api_lifecycle_get(
     user: User = Depends(require_user()),
 ):
     return lifecycle_service.get_change_request(
-        db, org_id=user.org_id, cr_id=str(request_id)
+        db, org_id=user.org_id, cr_id=str(request_id), actor=user
     )
 
 
@@ -1786,8 +2292,52 @@ def api_lifecycle_reject(
 def api_lifecycle_cancel(
     request_id: UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+    user: User = Depends(require_user()),
 ):
     return lifecycle_service.cancel_change_request(
         db, org_id=user.org_id, actor=user, cr_id=str(request_id)
+    )
+
+
+@router.patch("/lifecycle/{request_id}", response_model=dict)
+def api_lifecycle_update(
+    request_id: UUID,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return lifecycle_service.update_change_request(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        cr_id=str(request_id),
+        changes=dict(payload),
+    )
+
+
+@router.post("/lifecycle/{request_id}/submit", response_model=dict)
+def api_lifecycle_submit(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    return lifecycle_service.submit_change_request(
+        db, org_id=user.org_id, actor=user, cr_id=str(request_id)
+    )
+
+
+@router.post("/lifecycle/{request_id}/complete", response_model=dict)
+def api_lifecycle_complete(
+    request_id: UUID,
+    payload: dict | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    details = (payload or {}).get("details")
+    return lifecycle_service.complete_change_request(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        cr_id=str(request_id),
+        details=details,
     )

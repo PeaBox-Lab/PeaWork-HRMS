@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}Talent — PeaWork HRMS{% endblock %}
+{% block heading %}Talent{% endblock %}
+{% block subheading %}Check-ins and 360 feedback{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Talent</h1>
+    <p>Check-in conversations and 360 feedback. Anonymous feedback is erased on submission — not just hidden.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/lifecycle">Lifecycle</a>
+  </div>
+</div>
+
+<div class="grid grid--3">
+  <div class="card stat">
+    <span class="stat__label">My check-ins</span>
+    <span class="stat__value">{{ check_ins|selectattr('status', 'equalto', 'pending')|list|length }}</span>
+    <span class="stat__hint">Pending conversations</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Feedback to give</span>
+    <span class="stat__value">{{ inbox|selectattr('status', 'equalto', 'pending')|list|length }}</span>
+    <span class="stat__hint">Requests in your inbox</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Feedback about me</span>
+    <span class="stat__value">{{ about_me|length }}</span>
+    <span class="stat__hint">Submitted reviews</span>
+  </div>
+</div>
+
+<div class="grid grid--main section">
+  <div class="stack">
+    <div class="card">
+      <div class="card__header">
+        <h2>Check-ins</h2>
+        <span class="spacer"></span>
+        <form method="get" action="/talent">
+          <select name="cycle" onchange="this.form.submit()" aria-label="Filter by review cycle">
+            <option value="">All cycles</option>
+            {% for cycle_row in cycles %}
+              <option value="{{ cycle_row.code }}" {% if cycle == cycle_row.code %}selected{% endif %}>{{ cycle_row.code }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+      {% if check_ins %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Employee</th><th>Cycle</th><th>Due</th><th>Status</th><th>Notes</th></tr></thead>
+            <tbody>
+            {% for row in check_ins %}
+              <tr>
+                <td>
+                  <strong>{{ row.employee_name }}</strong><br>
+                  <small class="muted">Manager: {{ row.manager_name or 'Unassigned' }}</small>
+                </td>
+                <td>{{ row.cycle_code }}<br><small class="muted">{{ row.cycle_status }}</small></td>
+                <td class="nowrap">{{ row.due_on|date if row.due_on else '—' }}</td>
+                <td><span class="badge badge--{{ row.status }}">{{ status_labels.get(row.status, row.status) }}</span></td>
+                <td>
+                  {% if row.employee_notes %}<p class="small"><strong>Employee:</strong> {{ row.employee_notes }}</p>{% endif %}
+                  {% if row.manager_notes %}<p class="small"><strong>Manager:</strong> {{ row.manager_notes }}</p>{% endif %}
+                  {% if row.rating %}<p class="small"><strong>Rating:</strong> {{ row.rating }}/5</p>{% endif %}
+                  {% if row.status == 'pending' and row.cycle_status != 'closed' %}
+                    <details>
+                      <summary class="small">Record this check-in</summary>
+                      <form method="post" action="/talent/check-ins/{{ row.id }}/submit">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        {% if row.employee_id == employee_id %}
+                          <div class="field">
+                            <label for="employee_notes_{{ row.id }}">Your notes</label>
+                            <textarea id="employee_notes_{{ row.id }}" name="employee_notes" rows="2"></textarea>
+                          </div>
+                        {% else %}
+                          <div class="field">
+                            <label for="manager_notes_{{ row.id }}">Manager notes</label>
+                            <textarea id="manager_notes_{{ row.id }}" name="manager_notes" rows="2"></textarea>
+                          </div>
+                          <div class="field">
+                            <label for="rating_{{ row.id }}">Rating (1–5)</label>
+                            <input id="rating_{{ row.id }}" name="rating" type="number" min="1" max="5" step="0.5">
+                          </div>
+                        {% endif %}
+                        <button class="btn btn--sm" type="submit">Save check-in</button>
+                      </form>
+                    </details>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">
+          <strong>No check-ins yet</strong>
+          {% if is_hr %}Open one from the panel on the right.{% else %}HR opens check-ins for each review cycle.{% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h2>Feedback to give</h2></div>
+      {% if inbox %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>About</th><th>Relationship</th><th>Due</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            {% for row in inbox %}
+              <tr>
+                <td><strong>{{ row.subject_name }}</strong>{% if row.anonymous %}<br><small class="muted">Anonymous to the subject</small>{% endif %}</td>
+                <td>{{ row.relationship_label }}</td>
+                <td class="nowrap">{{ row.due_on|date if row.due_on else '—' }}</td>
+                <td><span class="badge badge--{{ row.status }}">{{ status_labels.get(row.status, row.status) }}</span></td>
+                <td>
+                  {% if row.status == 'pending' %}
+                    <details>
+                      <summary class="small">Give feedback</summary>
+                      <form method="post" action="/talent/feedback/{{ row.id }}/submit">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <div class="field">
+                          <label for="strengths_{{ row.id }}">Strengths</label>
+                          <textarea id="strengths_{{ row.id }}" name="strengths" rows="2"></textarea>
+                        </div>
+                        <div class="field">
+                          <label for="improvements_{{ row.id }}">Improvements</label>
+                          <textarea id="improvements_{{ row.id }}" name="improvements" rows="2"></textarea>
+                        </div>
+                        <div class="field">
+                          <label for="comments_{{ row.id }}">Comments</label>
+                          <textarea id="comments_{{ row.id }}" name="comments" rows="2"></textarea>
+                        </div>
+                        <div class="field">
+                          <label for="fb_rating_{{ row.id }}">Rating (1–5)</label>
+                          <input id="fb_rating_{{ row.id }}" name="rating" type="number" min="1" max="5" step="0.5">
+                        </div>
+                        <div class="actions">
+                          <button class="btn btn--sm" type="submit">Submit feedback</button>
+                        </div>
+                      </form>
+                      <form method="post" action="/talent/feedback/{{ row.id }}/decline">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <button class="btn btn--ghost btn--sm" type="submit">Decline</button>
+                      </form>
+                    </details>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">No feedback requests in your inbox.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h2>Feedback about me</h2></div>
+      {% if about_me %}
+        <div class="stack">
+        {% for row in about_me %}
+          <div class="card">
+            <p class="small">
+              <strong>{{ row.relationship_label }}</strong>
+              {% if row.anonymous %}· <span class="muted">Anonymous</span>{% elif row.reviewer_name %}· {{ row.reviewer_name }}{% endif %}
+              {% if row.rating %}· {{ row.rating }}/5{% endif %}
+            </p>
+            {% if row.strengths %}<p class="small"><strong>Strengths:</strong> {{ row.strengths }}</p>{% endif %}
+            {% if row.improvements %}<p class="small"><strong>Improvements:</strong> {{ row.improvements }}</p>{% endif %}
+            {% if row.comments %}<p class="small">{{ row.comments }}</p>{% endif %}
+          </div>
+        {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">No submitted feedback about you yet.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stack">
+    {% if is_hr %}
+      <div class="card">
+        <div class="card__header"><h2>Open a check-in</h2></div>
+        <form method="post" action="/talent/check-ins">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="cycle_code">Review cycle</label>
+            <select id="cycle_code" name="cycle_code" required>
+              <option value="">Choose a cycle</option>
+              {% for cycle_row in open_cycles %}
+                <option value="{{ cycle_row.code }}">{{ cycle_row.code }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="employee_id">Employee</label>
+            <select id="employee_id" name="employee_id" required>
+              <option value="">Choose an employee</option>
+              {% for emp in employees %}<option value="{{ emp.id }}">{{ emp.full_name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="due_on">Due date</label>
+            <input id="due_on" name="due_on" type="date">
+          </div>
+          <button class="btn" type="submit" style="width: 100%;">Open check-in</button>
+        </form>
+      </div>
+    {% endif %}
+
+    {% if can_create %}
+      <div class="card">
+        <div class="card__header"><h2>Request 360 feedback</h2></div>
+        <form method="post" action="/talent/feedback-requests">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="subject_employee_id">Subject</label>
+            <select id="subject_employee_id" name="subject_employee_id" required>
+              <option value="">Choose an employee</option>
+              {% for emp in employees %}<option value="{{ emp.id }}">{{ emp.full_name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="reviewer_employee_id">Reviewer</label>
+            <select id="reviewer_employee_id" name="reviewer_employee_id">
+              <option value="">Self review (subject)</option>
+              {% for emp in employees %}<option value="{{ emp.id }}">{{ emp.full_name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="relationship">Relationship</label>
+            <select id="relationship" name="relationship">
+              {% for value, label in relationships %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fb_cycle">Cycle</label>
+            <select id="fb_cycle" name="cycle_code">
+              <option value="">No cycle</option>
+              {% for cycle_row in open_cycles %}<option value="{{ cycle_row.code }}">{{ cycle_row.code }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fb_due">Due date</label>
+            <input id="fb_due" name="due_on" type="date">
+          </div>
+          <div class="field">
+            <label class="check">
+              <input type="checkbox" name="anonymous" value="1">
+              <span>Anonymous — reviewer identity is erased on submission</span>
+            </label>
+          </div>
+          <button class="btn" type="submit" style="width: 100%;">Request feedback</button>
+        </form>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>Privacy</h3></div>
+      <p class="muted small">Self, the employee's manager, HR, admins and auditors can read submitted feedback. Peers cannot see that a request exists. Anonymous submissions null the reviewer columns and the audit actor in the same transaction.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

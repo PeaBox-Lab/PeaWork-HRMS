@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Offboarding — PeaWork HRMS{% endblock %}
+{% block heading %}Lifecycle{% endblock %}
+{% block subheading %}Offboarding{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Offboarding</h1>
+    <p>Separations, notice, clearance and final pay — with a checklist anchored to the last working day.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/onboarding">Onboarding</a>
+    <a class="btn btn--ghost" href="/job-changes">Job changes</a>
+    <a class="btn btn--ghost" href="/lifecycle">All requests</a>
+  </div>
+</div>
+
+<div class="grid grid--3">
+  <div class="card stat">
+    <span class="stat__label">Open separations</span>
+    <span class="stat__value">{{ open_count }}</span>
+    <span class="stat__hint">In notice or clearance</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Exited</span>
+    <span class="stat__value">{{ exit_count }}</span>
+    <span class="stat__hint">Completed offboarding</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Checklist owners</span>
+    <span class="stat__value">6</span>
+    <span class="stat__hint">HR, manager, employee, IT, finance</span>
+  </div>
+</div>
+
+<div class="grid grid--main section">
+  <div class="card">
+    <div class="card__header">
+      <h2>Separations</h2>
+      <span class="spacer"></span>
+      <span class="muted small">{{ separations|length }} shown</span>
+    </div>
+    {% if separations %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Employee</th><th>Exit type</th><th>Notice</th><th>Last day</th><th>Clearance</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for row in separations %}
+            <tr>
+              <td><a href="/offboarding/{{ row.id }}"><strong>{{ row.employee_name }}</strong></a><br><small class="muted">{{ row.employee_no }}</small></td>
+              <td>{{ row.exit_type_label }}</td>
+              <td class="nowrap">{{ row.notice_date|date if row.notice_date else '—' }}</td>
+              <td class="nowrap">{{ row.last_working_day|date }}</td>
+              <td class="nowrap">
+                {% if row.exit_interview_done %}<span class="badge badge--approved">Exit interview</span>{% endif %}
+                {% if row.final_pay_ready %}<span class="badge badge--approved">Final pay ready</span>{% endif %}
+                {% if not row.exit_interview_done and not row.final_pay_ready %}<span class="muted">In progress</span>{% endif %}
+              </td>
+              <td><span class="badge badge--{{ row.status }}">{{ row.status_label }}</span></td>
+              <td class="right"><a class="btn btn--ghost btn--sm" href="/offboarding/{{ row.id }}">Open case</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">
+        <strong>No separations recorded</strong>
+        {% if is_hr %}Initiate one from the panel on the right.{% else %}HR records exits here.{% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    {% if is_hr %}
+      <div class="card">
+        <div class="card__header"><h2>Initiate offboarding</h2></div>
+        <form method="post" action="/offboarding/start">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="employee_id">Employee</label>
+            <select id="employee_id" name="employee_id" required>
+              <option value="">Choose an employee</option>
+              {% for emp in employees %}
+                <option value="{{ emp.id }}">{{ emp.full_name }} ({{ emp.employee_no }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="exit_type">Exit type</label>
+            <select id="exit_type" name="exit_type" required>
+              {% for value, label in exit_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="notice_date">Notice date</label>
+            <input id="notice_date" name="notice_date" type="date" value="{{ today }}">
+          </div>
+          <div class="field">
+            <label for="last_working_day">Last working day</label>
+            <input id="last_working_day" name="last_working_day" type="date" required>
+          </div>
+          <div class="field">
+            <label class="check">
+              <input type="checkbox" name="rehire_eligible" value="1" checked>
+              <span>Eligible for rehire</span>
+            </label>
+          </div>
+          <div class="field">
+            <label for="notes">Notes</label>
+            <textarea id="notes" name="notes" rows="2" placeholder="Reason, handover context"></textarea>
+          </div>
+          <button class="btn" type="submit" style="width: 100%;">Start offboarding</button>
+        </form>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>Default checklist</h3></div>
+      <p class="muted small">Exit letter, handover, manager sign-off, equipment return, access revocation, final pay and an exit interview. Due dates count back from the last working day.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

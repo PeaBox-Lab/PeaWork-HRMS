@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}New change request · PeaWork HRMS{% endblock %}
+{% block heading %}New change request{% endblock %}
+{% block subheading %}Draft · not yet submitted{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Raise a change request</h1>
+    <p>Capture the change now; submit it for HR approval when it is ready.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/lifecycle">Back to lifecycle</a>
+  </div>
+</div>
+
+{% if form_error %}
+  <div class="alert alert--danger" role="alert"><span>{{ form_error }}</span></div>
+{% endif %}
+
+<div class="card" style="max-width: 900px;">
+  <form method="post" action="/lifecycle/new">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="form-grid">
+      <div class="field">
+        <label for="employee_id">Employee</label>
+        <select id="employee_id" name="employee_id" required>
+          {% for employee in employees %}
+            <option value="{{ employee.id }}" {% if values.employee_id == employee.id|string %}selected{% endif %}>
+              {{ employee.full_name }} · {{ employee.employee_no }}
+            </option>
+          {% else %}
+            <option value="">No employee record available</option>
+          {% endfor %}
+        </select>
+        {% if not is_hr %}
+          <span class="hint">You can raise requests for yourself{% if user.role.value == 'manager' %} and your direct reports{% endif %}.</span>
+        {% endif %}
+      </div>
+      <div class="field">
+        <label for="change_type">Change type</label>
+        <select id="change_type" name="change_type" required>
+          {% for item in change_types %}
+            <option value="{{ item.value }}" {% if values.change_type == item.value %}selected{% endif %}>
+              {{ item.value|replace('_', ' ')|title }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="effective_date">Effective date</label>
+        <input id="effective_date" name="effective_date" type="date" value="{{ values.effective_date }}" required>
+      </div>
+      <div class="field">
+        <label for="location">New location <small class="muted">(optional)</small></label>
+        <input id="location" name="location" type="text" maxlength="120" value="{{ values.location }}" placeholder="e.g. Pune">
+        <span class="hint">Applied to the employee when the request is completed.</span>
+      </div>
+      <div class="field field--full">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3" maxlength="2000" placeholder="Why is this change being requested?">{{ values.description }}</textarea>
+      </div>
+      <div class="field field--full">
+        <label for="reason">Note for approver <small class="muted">(optional)</small></label>
+        <input id="reason" name="reason" type="text" maxlength="2000" value="{{ values.reason }}">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn" type="submit" {% if not employees %}disabled{% endif %}>Create draft</button>
+      <a class="btn btn--ghost" href="/lifecycle">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

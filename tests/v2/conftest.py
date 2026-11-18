@@ -87,3 +87,11 @@ def second_client(client):
     application = create_app()
     with TestClient(application, follow_redirects=False) as test_client:
         yield test_client
+
+
+@pytest.fixture()
+def third_client(client):
+    """A third independent cookie jar for three-role scenarios."""
+    application = create_app()
+    with TestClient(application, follow_redirects=False) as test_client:
+        yield test_client

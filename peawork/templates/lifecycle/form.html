@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ cr.code or 'change request' }} · PeaWork HRMS{% endblock %}
+{% block heading %}Edit change request{% endblock %}
+{% block subheading %}{{ cr.code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Edit draft</h1>
+    <p>{{ cr.change_type|replace('_', ' ')|title if cr.change_type else 'Change request' }} · only drafts can be edited.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/lifecycle/{{ cr.id }}">Back to request</a>
+  </div>
+</div>
+
+{% if form_error %}
+  <div class="alert alert--danger" role="alert"><span>{{ form_error }}</span></div>
+{% endif %}
+
+<div class="card" style="max-width: 900px;">
+  <form method="post" action="/lifecycle/{{ cr.id }}/edit">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="form-grid">
+      {% if is_hr %}
+        <div class="field">
+          <label for="employee_id">Employee</label>
+          <select id="employee_id" name="employee_id">
+            <option value="">Not linked</option>
+            {% for employee in employees %}
+              <option value="{{ employee.id }}" {% if values.employee_id == employee.id|string %}selected{% endif %}>
+                {{ employee.full_name }} · {{ employee.employee_no }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      <div class="field">
+        <label for="effective_date">Effective date</label>
+        <input id="effective_date" name="effective_date" type="date" value="{{ values.effective_date }}" required>
+      </div>
+      <div class="field">
+        <label for="location">New location <small class="muted">(optional)</small></label>
+        <input id="location" name="location" type="text" maxlength="120" value="{{ values.location }}">
+      </div>
+      <div class="field">
+        <label for="old_value">Current value</label>
+        <input id="old_value" name="old_value" type="text" maxlength="4000" value="{{ values.old_value }}">
+      </div>
+      <div class="field">
+        <label for="new_value">Requested value</label>
+        <input id="new_value" name="new_value" type="text" maxlength="4000" value="{{ values.new_value }}">
+      </div>
+      <div class="field field--full">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3" maxlength="2000">{{ values.description }}</textarea>
+      </div>
+      <div class="field">
+        <label for="reason">Note for approver</label>
+        <input id="reason" name="reason" type="text" maxlength="2000" value="{{ values.reason }}">
+      </div>
+      <div class="field">
+        <label for="notes">Internal notes</label>
+        <input id="notes" name="notes" type="text" maxlength="2000" value="{{ values.notes }}">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn" type="submit">Save changes</button>
+      <a class="btn btn--ghost" href="/lifecycle/{{ cr.id }}">Discard</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

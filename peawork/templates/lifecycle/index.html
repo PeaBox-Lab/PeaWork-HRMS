@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Lifecycle · PeaWork HRMS{% endblock %}
+{% block heading %}Lifecycle{% endblock %}
+{% block subheading %}{{ total }} change request{% if total != 1 %}s{% endif %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Lifecycle change requests</h1>
+    <p>Raise, route and apply effective-dated employee changes.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/employees">People directory</a>
+  </div>
+</div>
+
+<div class="grid grid--4">
+  <div class="card stat">
+    <span class="stat__label">Drafts</span>
+    <span class="stat__value">{{ counts['draft'] }}</span>
+    <span class="stat__hint">Not yet submitted</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Awaiting approval</span>
+    <span class="stat__value">{{ counts['pending_approval'] }}</span>
+    <span class="stat__hint">Needs an HR decision</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Approved</span>
+    <span class="stat__value">{{ counts['approved'] }}</span>
+    <span class="stat__hint">Ready to apply</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Completed</span>
+    <span class="stat__value">{{ counts['completed'] }}</span>
+    <span class="stat__hint">Applied to employee records</span>
+  </div>
+</div>
+
+<div class="card section">
+  <div class="card__header"><h2>Lifecycle modules</h2></div>
+  <div class="grid grid--4">
+    <div>
+      <h3><a href="/onboarding">Onboarding</a></h3>
+      <p class="muted small">Preboarding, IT setup, manager plan and first-week check-ins.</p>
+    </div>
+    <div>
+      <h3><a href="/job-changes">Job changes</a></h3>
+      <p class="muted small">Promotions, transfers and data changes with events, reasons and approvals.</p>
+    </div>
+    <div>
+      <h3><a href="/offboarding">Offboarding</a></h3>
+      <p class="muted small">Exit cases, clearance checklists, final pay and exit interviews.</p>
+    </div>
+    <div>
+      <h3>All requests</h3>
+      <p class="muted small">The raw effective-dated request list, for legacy and non-standard changes.</p>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid--main section">
+  <div class="stack">
+    {% if can_approve and pending %}
+      <div class="card">
+        <div class="card__header">
+          <h2>Awaiting your approval</h2>
+          <span class="spacer"></span>
+          <span class="badge badge--pending_approval">{{ pending|length }}</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Request</th><th>Employee</th><th>Type</th><th>Effective</th><th></th></tr></thead>
+            <tbody>
+            {% for item in pending %}
+              {% set employee = employees_by_id.get(item.employee_id) %}
+              <tr>
+                <td><a href="/lifecycle/{{ item.id }}"><strong>{{ item.code }}</strong></a></td>
+                <td class="nowrap">
+                  {% if employee %}
+                    {{ employee.full_name }}<br><small class="muted">{{ employee.employee_no }}</small>
+                  {% else %}
+                    <span class="muted">Unlinked</span>
+                  {% endif %}
+                </td>
+                <td>{{ item.change_type|replace('_', ' ')|title }}</td>
+                <td class="nowrap">{{ item.effective_date|date }}</td>
+                <td class="right nowrap">
+                  <form method="post" action="/lifecycle/{{ item.id }}/approve" class="inline-form">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button class="btn btn--sm" type="submit">Approve</button>
+                  </form>
+                  <form method="post" action="/lifecycle/{{ item.id }}/reject" class="inline-form">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="reason" value="Rejected from approval queue">
+                    <button class="btn btn--ghost btn--sm" type="submit">Reject</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header">
+        <h2>All requests</h2>
+        <span class="spacer"></span>
+        <span class="muted small">{{ requests|length }} shown</span>
+      </div>
+      <form class="filters" method="get" action="/lifecycle">
+        <div class="field">
+          <label for="status">Status</label>
+          <select id="status" name="status" onchange="this.form.submit()">
+            <option value="">All statuses</option>
+            {% for value, label in status_options %}
+              <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="change_type">Change type</label>
+          <select id="change_type" name="change_type" onchange="this.form.submit()">
+            <option value="">All types</option>
+            {% for value, label in change_type_options %}
+              <option value="{{ value }}" {% if change_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <noscript><button class="btn btn--ghost btn--sm" type="submit">Apply filters</button></noscript>
+      </form>
+
+      {% if requests %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr><th>Request</th><th>Employee</th><th>Type</th><th>Effective</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+            {% for item in requests %}
+              {% set employee = employees_by_id.get(item.employee_id) %}
+              <tr>
+                <td>
+                  <a href="/lifecycle/{{ item.id }}"><strong>{{ item.code }}</strong></a><br>
+                  <small class="muted">{{ item.description or 'No description' }}</small>
+                </td>
+                <td class="nowrap">
+                  {% if employee %}
+                    <a href="/employees/{{ employee.id }}">{{ employee.full_name }}</a><br>
+                    <small class="muted">{{ employee.employee_no }}</small>
+                  {% else %}
+                    <span class="muted">Unlinked draft</span>
+                  {% endif %}
+                </td>
+                <td>{{ item.change_type|replace('_', ' ')|title }}</td>
+                <td class="nowrap">{{ item.effective_date|date }}</td>
+                <td><span class="badge badge--{{ item.status }}">{{ status_labels[item.status] }}</span></td>
+                <td class="right nowrap"><a class="btn btn--ghost btn--sm" href="/lifecycle/{{ item.id }}">Open</a></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">
+          <strong>No change requests match this view</strong>
+          Raise a request to start the approval workflow.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stack">
+    {% if can_create %}
+      <div class="card">
+        <div class="card__header"><h2>New change request</h2></div>
+        <p class="muted small">
+          {% if is_hr %}
+            Raise a promotion, transfer, location change, resignation or any other lifecycle event for any employee.
+          {% else %}
+            Raise a request for yourself{% if user.role.value == 'manager' %} or one of your direct reports{% endif %}. HR reviews and applies it.
+          {% endif %}
+        </p>
+        <a class="btn" href="/lifecycle/new" style="width: 100%;">Create a change request</a>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>How the workflow works</h3></div>
+      <ul class="timeline">
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Draft</strong><small>Owner or HR prepares the change. Only drafts are editable.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Awaiting approval</strong><small>Submitted request is queued for an HR decision.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Approved</strong><small>HR confirms the target values, then completes the request.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Completed</strong><small>Employee record updated and an effective-dated history event is written.</small></div></li>
+      </ul>
+    </div>
+
+    {% if is_read_only %}
+      <div class="card">
+        <div class="card__header"><h3>Read-only access</h3></div>
+        <p class="muted small">Your role can review lifecycle activity but cannot raise or approve changes.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

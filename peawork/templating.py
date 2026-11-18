@@ -17,13 +17,25 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 
-def _date(value: date | datetime | None, fmt: str = "%d %b %Y") -> str:
-    if value is None:
+def _date(value: date | datetime | str | None, fmt: str = "%d %b %Y") -> str:
+    if value is None or value == "":
         return "—"
+    if isinstance(value, str):
+        try:
+            value = date.fromisoformat(value[:10])
+        except ValueError:
+            return value
     return value.strftime(fmt)
 
 
-def _datetime(value: datetime | None, fmt: str = "%d %b %Y, %H:%M") -> str:
+def _datetime(value: datetime | str | None, fmt: str = "%d %b %Y, %H:%M") -> str:
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
     value = as_utc(value)
     if value is None:
         return "—"

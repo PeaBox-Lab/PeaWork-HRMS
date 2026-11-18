@@ -7,12 +7,21 @@ Wires review‑cycle actions into the existing R2 DB‑backed job queue.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import false, or_, select
 from sqlalchemy.orm import Session
 
+from ..domain import (
+    CheckInStatus,
+    FeedbackRelationship,
+    FeedbackStatus,
+    Role,
+)
+from ..models import Employee, FeedbackRequest, ReviewCheckIn, ReviewCycle, User, utcnow
 from ..services import audit
-from ..services.errors import ValidationError
+from ..services.errors import ForbiddenError, NotFoundError, ValidationError
 from ..services.jobs import enqueue as _job_enqueue
 
 
@@ -388,3 +397,532 @@ def list_goal_progress(db: Session, *, org_id, goal_id: str) -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# R4: Check-ins
+# ---------------------------------------------------------------------------
+
+_HR_ROLES = {Role.ADMIN, Role.HR}
+# Roles that may read any employee's talent data.
+_READ_ALL_ROLES = {Role.ADMIN, Role.HR, Role.AUDITOR}
+
+
+def _is_hr(user) -> bool:
+    return user.role in _HR_ROLES
+
+
+def _employee(db: Session, org_id, employee_id) -> "Employee":
+    employee = db.get(Employee, UUID(str(employee_id)))
+    if employee is None or employee.org_id != org_id:
+        raise NotFoundError("Employee not found in this organisation")
+    return employee
+
+
+def _cycle_by_code(db: Session, org_id, cycle_code: str) -> "ReviewCycle":
+    cycle = db.scalar(
+        select(ReviewCycle).where(
+            ReviewCycle.org_id == org_id, ReviewCycle.code == cycle_code
+        )
+    )
+    if cycle is None:
+        raise NotFoundError(f"Review cycle '{cycle_code}' not found")
+    return cycle
+
+
+def _require_cycle_open(cycle) -> None:
+    if cycle is not None and cycle.status == "closed":
+        raise ValidationError(f"Review cycle '{cycle.code}' is closed")
+
+
+def _can_view_employee(user, employee) -> bool:
+    """Object-level visibility for talent data."""
+    if user.role in _READ_ALL_ROLES:
+        return True
+    if employee is None or user.employee_id is None:
+        return False
+    if employee.id == user.employee_id:
+        return True
+    return user.role == Role.MANAGER and employee.manager_id == user.employee_id
+
+
+def _require_view(user, employee) -> None:
+    if not _can_view_employee(user, employee):
+        # Do not leak the existence of other employees' talent records.
+        raise NotFoundError("Employee not found in this organisation")
+
+
+def _int_rating(value) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        rating = Decimal(str(value))
+    except (ArithmeticError, ValueError, TypeError) as exc:
+        raise ValidationError("rating must be a number between 1 and 5") from exc
+    if rating < 1 or rating > 5:
+        raise ValidationError("rating must be between 1 and 5")
+    return rating.quantize(Decimal("0.1"))
+
+
+def _serialize_check_in(db: Session, check_in) -> dict:
+    employee = db.get(Employee, check_in.employee_id)
+    manager = db.get(Employee, check_in.manager_id) if check_in.manager_id else None
+    cycle = db.get(ReviewCycle, check_in.cycle_id)
+    return {
+        "id": str(check_in.id),
+        "cycle_id": str(check_in.cycle_id),
+        "cycle_code": cycle.code if cycle else None,
+        "cycle_status": cycle.status if cycle else None,
+        "employee_id": str(check_in.employee_id),
+        "employee_name": employee.full_name if employee else None,
+        "manager_id": str(check_in.manager_id) if check_in.manager_id else None,
+        "manager_name": manager.full_name if manager else None,
+        "due_on": check_in.due_on.isoformat() if check_in.due_on else None,
+        "status": check_in.status.value,
+        "employee_notes": check_in.employee_notes,
+        "manager_notes": check_in.manager_notes,
+        "rating": float(check_in.rating) if check_in.rating is not None else None,
+        "submitted_at": check_in.submitted_at.isoformat() if check_in.submitted_at else None,
+        "created_at": check_in.created_at.isoformat(),
+    }
+
+
+def create_check_in(
+    db: Session,
+    *,
+    org_id,
+    actor,
+    cycle_code: str,
+    employee_id: str,
+    due_on: date | None = None,
+) -> dict:
+    """Open a check-in for one employee inside a review cycle (HR only)."""
+    _require_reviewer(actor)
+    cycle = _cycle_by_code(db, org_id, cycle_code)
+    _require_cycle_open(cycle)
+    employee = _employee(db, org_id, employee_id)
+
+    existing = db.scalar(
+        select(ReviewCheckIn).where(
+            ReviewCheckIn.cycle_id == cycle.id,
+            ReviewCheckIn.employee_id == employee.id,
+        )
+    )
+    if existing is not None:
+        raise ValidationError(
+            f"A check-in already exists for {employee.full_name} in cycle '{cycle.code}'"
+        )
+
+    check_in = ReviewCheckIn(
+        org_id=org_id,
+        cycle_id=cycle.id,
+        employee_id=employee.id,
+        manager_id=employee.manager_id,
+        due_on=due_on or cycle.end_date,
+        status=CheckInStatus.PENDING,
+    )
+    db.add(check_in)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=actor,
+        action="create",
+        entity_type="review_check_in",
+        entity_id=check_in.id,
+        details={"cycle": cycle.code, "employee_id": str(employee.id)},
+        org_id=org_id,
+    )
+    return _serialize_check_in(db, check_in)
+
+
+def list_check_ins(
+    db: Session,
+    *,
+    org_id,
+    user,
+    cycle_code: str | None = None,
+    status: str | None = None,
+) -> list[dict]:
+    """Check-ins visible to *user*: HR-wide, manager team, or self."""
+    stmt = select(ReviewCheckIn).where(ReviewCheckIn.org_id == org_id)
+    if user.role in _READ_ALL_ROLES:
+        pass
+    elif user.role == Role.MANAGER and user.employee_id:
+        report_ids = select(Employee.id).where(
+            Employee.org_id == org_id, Employee.manager_id == user.employee_id
+        )
+        stmt = stmt.where(
+            or_(
+                ReviewCheckIn.employee_id == user.employee_id,
+                ReviewCheckIn.employee_id.in_(report_ids),
+            )
+        )
+    elif user.employee_id:
+        stmt = stmt.where(ReviewCheckIn.employee_id == user.employee_id)
+    else:
+        return []
+
+    if cycle_code:
+        stmt = stmt.where(ReviewCheckIn.cycle_id == _cycle_by_code(db, org_id, cycle_code).id)
+    if status:
+        stmt = stmt.where(ReviewCheckIn.status == status)
+
+    rows = db.scalars(stmt.order_by(ReviewCheckIn.due_on, ReviewCheckIn.created_at)).all()
+    return [_serialize_check_in(db, row) for row in rows]
+
+
+def get_check_in(db: Session, *, org_id, user, check_in_id: str) -> dict:
+    check_in = db.scalar(
+        select(ReviewCheckIn).where(
+            ReviewCheckIn.org_id == org_id, ReviewCheckIn.id == UUID(str(check_in_id))
+        )
+    )
+    if check_in is None:
+        raise NotFoundError(f"Check-in '{check_in_id}' not found")
+    _require_view(user, db.get(Employee, check_in.employee_id))
+    return _serialize_check_in(db, check_in)
+
+
+def submit_check_in(
+    db: Session,
+    *,
+    org_id,
+    actor,
+    check_in_id: str,
+    employee_notes: str | None = None,
+    manager_notes: str | None = None,
+    rating=None,
+) -> dict:
+    """Record check-in notes.
+
+    Employees write their own notes; managers write manager notes and the
+    rating; HR may write both. Edits stay open until the cycle is closed.
+    """
+    check_in = db.scalar(
+        select(ReviewCheckIn).where(
+            ReviewCheckIn.org_id == org_id, ReviewCheckIn.id == UUID(str(check_in_id))
+        )
+    )
+    if check_in is None:
+        raise NotFoundError(f"Check-in '{check_in_id}' not found")
+
+    employee = db.get(Employee, check_in.employee_id)
+    _require_view(actor, employee)
+    cycle = db.get(ReviewCycle, check_in.cycle_id)
+    _require_cycle_open(cycle)
+
+    is_subject = actor.employee_id is not None and check_in.employee_id == actor.employee_id
+    is_manager = bool(
+        actor.role == Role.MANAGER
+        and employee is not None
+        and employee.manager_id == actor.employee_id
+    )
+    if manager_notes is not None or rating is not None:
+        # The subject may describe their own work but never grade themselves.
+        if not (_is_hr(actor) or is_manager):
+            raise ForbiddenError("You cannot write manager notes for this check-in")
+    if employee_notes is not None and not (_is_hr(actor) or is_subject or is_manager):
+        raise ForbiddenError("You cannot write employee notes for this check-in")
+
+    rating_value = _int_rating(rating)
+    if employee_notes is None and manager_notes is None and rating_value is None:
+        raise ValidationError("Provide notes or a rating before submitting")
+
+    if employee_notes is not None:
+        check_in.employee_notes = employee_notes
+    if manager_notes is not None:
+        check_in.manager_notes = manager_notes
+    if rating_value is not None:
+        check_in.rating = rating_value
+    check_in.status = CheckInStatus.SUBMITTED
+    check_in.submitted_at = utcnow()
+    check_in.submitted_by = actor.id
+    db.add(check_in)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=actor,
+        action="update",
+        entity_type="review_check_in",
+        entity_id=check_in.id,
+        details={"status": "submitted"},
+        org_id=org_id,
+    )
+    return _serialize_check_in(db, check_in)
+
+
+# ---------------------------------------------------------------------------
+# R4: 360 feedback
+# ---------------------------------------------------------------------------
+
+
+def _serialize_feedback(db: Session, request, *, include_reviewer: bool = True) -> dict:
+    subject = db.get(Employee, request.subject_employee_id)
+    reviewer = (
+        db.get(Employee, request.reviewer_employee_id)
+        if include_reviewer and request.reviewer_employee_id
+        else None
+    )
+    cycle = db.get(ReviewCycle, request.cycle_id) if request.cycle_id else None
+    return {
+        "id": str(request.id),
+        "cycle_id": str(request.cycle_id) if request.cycle_id else None,
+        "cycle_code": cycle.code if cycle else None,
+        "subject_employee_id": str(request.subject_employee_id),
+        "subject_name": subject.full_name if subject else None,
+        "reviewer_employee_id": str(request.reviewer_employee_id)
+        if include_reviewer and request.reviewer_employee_id
+        else None,
+        "reviewer_name": reviewer.full_name if reviewer else None,
+        "relationship": request.relationship.value,
+        "relationship_label": request.relationship.label,
+        "anonymous": bool(request.anonymous),
+        "status": request.status.value,
+        "due_on": request.due_on.isoformat() if request.due_on else None,
+        "strengths": request.strengths,
+        "improvements": request.improvements,
+        "comments": request.comments,
+        "rating": float(request.rating) if request.rating is not None else None,
+        "submitted_at": request.submitted_at.isoformat() if request.submitted_at else None,
+        "created_at": request.created_at.isoformat(),
+    }
+
+
+def create_feedback_request(
+    db: Session,
+    *,
+    org_id,
+    actor,
+    subject_employee_id: str,
+    reviewer_employee_id: str | None = None,
+    cycle_code: str | None = None,
+    relationship: str = "peer",
+    anonymous: bool = False,
+    due_on: date | None = None,
+) -> dict:
+    """Ask someone for 360 feedback about an employee.
+
+    HR/admin may ask anyone about anyone. A manager may ask about themselves or
+    a direct report. Everyone else may only request a self-review. ``anonymous``
+    requests are scrubbed of reviewer identity when submitted.
+    """
+    try:
+        relationship_enum = FeedbackRelationship(str(relationship))
+    except ValueError as exc:
+        raise ValidationError(
+            "relationship must be one of: "
+            + ", ".join(item.value for item in FeedbackRelationship)
+        ) from exc
+
+    subject = _employee(db, org_id, subject_employee_id)
+    if not _is_hr(actor):
+        allowed = subject.id == actor.employee_id or (
+            actor.role == Role.MANAGER
+            and subject.manager_id == actor.employee_id
+        )
+        if not allowed:
+            raise ForbiddenError("You can only request feedback about yourself or your reports")
+
+    if relationship_enum == FeedbackRelationship.SELF:
+        reviewer_employee_id = str(subject.id)
+    elif not reviewer_employee_id:
+        raise ValidationError("reviewer_employee_id is required for this relationship")
+
+    reviewer = _employee(db, org_id, reviewer_employee_id)
+    cycle = _cycle_by_code(db, org_id, cycle_code) if cycle_code else None
+    _require_cycle_open(cycle)
+
+    existing = db.scalar(
+        select(FeedbackRequest).where(
+            FeedbackRequest.org_id == org_id,
+            FeedbackRequest.subject_employee_id == subject.id,
+            FeedbackRequest.reviewer_employee_id == reviewer.id,
+            FeedbackRequest.cycle_id == (cycle.id if cycle else None),
+        )
+    )
+    if existing is not None:
+        raise ValidationError(
+            "A feedback request already exists for this reviewer in this cycle"
+        )
+
+    request = FeedbackRequest(
+        org_id=org_id,
+        cycle_id=cycle.id if cycle else None,
+        subject_employee_id=subject.id,
+        reviewer_employee_id=reviewer.id,
+        reviewer_user_id=(
+            db.scalar(select(User.id).where(User.employee_id == reviewer.id))
+        ),
+        relationship=relationship_enum,
+        anonymous=bool(anonymous),
+        status=FeedbackStatus.PENDING,
+        due_on=due_on or (cycle.end_date if cycle else None),
+        requested_by=actor.id,
+    )
+    db.add(request)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=actor,
+        action="create",
+        entity_type="feedback_request",
+        entity_id=request.id,
+        details={
+            "subject_id": str(subject.id),
+            "reviewer_id": str(reviewer.id),
+            "relationship": relationship_enum.value,
+            "anonymous": bool(anonymous),
+        },
+        org_id=org_id,
+    )
+    return _serialize_feedback(db, request)
+
+
+def _reviewer_owns(actor, request) -> bool:
+    if request.reviewer_user_id is not None and request.reviewer_user_id == actor.id:
+        return True
+    return bool(
+        request.reviewer_employee_id
+        and actor.employee_id
+        and request.reviewer_employee_id == actor.employee_id
+    )
+
+
+def list_my_feedback_requests(
+    db: Session, *, org_id, actor, status: str | None = None
+) -> list[dict]:
+    """The reviewer inbox: requests assigned to the signed-in user."""
+    stmt = select(FeedbackRequest).where(
+        FeedbackRequest.org_id == org_id,
+        or_(
+            FeedbackRequest.reviewer_user_id == actor.id,
+            (
+                FeedbackRequest.reviewer_employee_id == actor.employee_id
+                if actor.employee_id
+                else false()
+            ),
+        ),
+    )
+    if status:
+        stmt = stmt.where(FeedbackRequest.status == status)
+    rows = db.scalars(
+        stmt.order_by(FeedbackRequest.status, FeedbackRequest.due_on)
+    ).all()
+    return [_serialize_feedback(db, row) for row in rows]
+
+
+def submit_feedback(
+    db: Session,
+    *,
+    org_id,
+    actor,
+    request_id: str,
+    strengths: str | None = None,
+    improvements: str | None = None,
+    comments: str | None = None,
+    rating=None,
+) -> dict:
+    """Submit feedback content as the assigned reviewer.
+
+    Anonymous submissions erase the reviewer link in the same transaction, so
+    the identity cannot be recovered later, including from the audit trail.
+    """
+    request = db.scalar(
+        select(FeedbackRequest).where(
+            FeedbackRequest.org_id == org_id,
+            FeedbackRequest.id == UUID(str(request_id)),
+        )
+    )
+    if request is None or not _reviewer_owns(actor, request):
+        raise NotFoundError(f"Feedback request '{request_id}' not found")
+    if request.status != FeedbackStatus.PENDING:
+        raise ValidationError(
+            f"Feedback request is already {request.status.value}"
+        )
+    if not any([(strengths or "").strip(), (improvements or "").strip(), (comments or "").strip()]):
+        raise ValidationError("Provide at least one feedback comment before submitting")
+
+    cycle = db.get(ReviewCycle, request.cycle_id) if request.cycle_id else None
+    _require_cycle_open(cycle)
+
+    request.strengths = (strengths or "").strip() or None
+    request.improvements = (improvements or "").strip() or None
+    request.comments = (comments or "").strip() or None
+    request.rating = _int_rating(rating)
+    request.status = FeedbackStatus.SUBMITTED
+    request.submitted_at = utcnow()
+
+    anonymous = bool(request.anonymous)
+    if anonymous:
+        # Deliberate: identity is destroyed, not merely hidden.
+        request.reviewer_employee_id = None
+        request.reviewer_user_id = None
+
+    db.add(request)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=None if anonymous else actor,
+        action="update",
+        entity_type="feedback_request",
+        entity_id=request.id,
+        details={"status": "submitted", "anonymous": anonymous},
+        org_id=org_id,
+    )
+    return _serialize_feedback(db, request)
+
+
+def decline_feedback(db: Session, *, org_id, actor, request_id: str) -> dict:
+    """Decline to provide feedback (reviewer only)."""
+    request = db.scalar(
+        select(FeedbackRequest).where(
+            FeedbackRequest.org_id == org_id,
+            FeedbackRequest.id == UUID(str(request_id)),
+        )
+    )
+    if request is None or not _reviewer_owns(actor, request):
+        raise NotFoundError(f"Feedback request '{request_id}' not found")
+    if request.status != FeedbackStatus.PENDING:
+        raise ValidationError(f"Feedback request is already {request.status.value}")
+
+    request.status = FeedbackStatus.DECLINED
+    db.add(request)
+    db.flush()
+
+    audit.record(
+        db,
+        actor=None if request.anonymous else actor,
+        action="update",
+        entity_type="feedback_request",
+        entity_id=request.id,
+        details={"status": "declined", "anonymous": bool(request.anonymous)},
+        org_id=org_id,
+    )
+    return _serialize_feedback(db, request)
+
+
+def list_feedback_for_employee(
+    db: Session, *, org_id, actor, employee_id: str
+) -> list[dict]:
+    """Submitted feedback about an employee, subject to the visibility matrix.
+
+    Self, manager-of and HR/admin/auditor may read. Anonymous rows never include
+    reviewer data because it no longer exists.
+    """
+    employee = _employee(db, org_id, employee_id)
+    _require_view(actor, employee)
+
+    rows = db.scalars(
+        select(FeedbackRequest)
+        .where(
+            FeedbackRequest.org_id == org_id,
+            FeedbackRequest.subject_employee_id == employee.id,
+            FeedbackRequest.status == FeedbackStatus.SUBMITTED,
+        )
+        .order_by(FeedbackRequest.submitted_at.desc())
+    ).all()
+    return [_serialize_feedback(db, row) for row in rows]

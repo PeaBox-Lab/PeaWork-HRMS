@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}{{ cr.code }} · Lifecycle · PeaWork HRMS{% endblock %}
+{% block heading %}Lifecycle request{% endblock %}
+{% block subheading %}{{ cr.code }}{% endblock %}
+{% block content %}
+{% set d = cr.details or {} %}
+<div class="page-header">
+  <div class="hero">
+    <span class="avatar" aria-hidden="true">{% if employee %}{{ employee.first_name|initials(employee.last_name) }}{% else %}CR{% endif %}</span>
+    <div>
+      <h1>{{ cr.code }}</h1>
+      <p>
+        {{ cr.change_type|replace('_', ' ')|title }}
+        {% if employee %}for <a href="/employees/{{ employee.id }}">{{ employee.full_name }}</a>{% endif %}
+        · effective {{ cr.effective_date|date }}
+      </p>
+    </div>
+  </div>
+  <div class="actions">
+    <span class="badge badge--{{ cr.status }}">{{ status_labels[cr.status] }}</span>
+    <a class="btn btn--ghost" href="/lifecycle">Back to lifecycle</a>
+  </div>
+</div>
+
+<div class="grid grid--main">
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h2>Request details</h2></div>
+      <dl class="detail-grid">
+        <div><dt>Status</dt><dd><span class="badge badge--{{ cr.status }}">{{ status_labels[cr.status] }}</span></dd></div>
+        <div><dt>Change type</dt><dd>{{ cr.change_type|replace('_', ' ')|title }}</dd></div>
+        <div><dt>Effective date</dt><dd>{{ cr.effective_date|date }}</dd></div>
+        <div><dt>Employee</dt><dd>{% if employee %}<a href="/employees/{{ employee.id }}">{{ employee.full_name }}</a>{% else %}<span class="muted">Not linked</span>{% endif %}</dd></div>
+        <div><dt>Created</dt><dd>{{ cr.created_at|datetime }}</dd></div>
+        <div><dt>Approved</dt><dd>{{ cr.approved_at|datetime }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h2>Requested change</h2></div>
+      {% if cr.description %}
+        <p>{{ cr.description }}</p>
+      {% else %}
+        <p class="muted small">No description was provided.</p>
+      {% endif %}
+
+      {% if cr.old_value or cr.new_value %}
+        <div class="grid grid--2 section">
+          <div>
+            <div class="stat__label">Current value</div>
+            <p>{{ cr.old_value or '—' }}</p>
+          </div>
+          <div>
+            <div class="stat__label">Requested value</div>
+            <p>{{ cr.new_value or '—' }}</p>
+          </div>
+        </div>
+      {% endif %}
+
+      {% if details %}
+        <div class="section">
+          <div class="section__head"><h3>Fields to apply</h3></div>
+          {% for label, value in details %}
+            <div class="kv"><span>{{ label }}</span><strong>{{ value }}</strong></div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted small section">No structured field changes were captured. The approver can add target values when completing this request.</p>
+      {% endif %}
+
+      {% if cr.reason %}
+        <div class="section">
+          <div class="stat__label">Approver note / decision</div>
+          <p>{{ cr.reason }}</p>
+        </div>
+      {% endif %}
+      {% if cr.notes %}
+        <div class="section">
+          <div class="stat__label">Notes</div>
+          <p>{{ cr.notes }}</p>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if can_complete %}
+      <div class="card">
+        <div class="card__header">
+          <h2>Apply to employee record</h2>
+          <span class="spacer"></span>
+          <span class="badge badge--approved">Approved</span>
+        </div>
+        <p class="muted small">Leave a field blank to keep the employee's current value. Changes are written as an effective-dated history event.</p>
+        <form method="post" action="/lifecycle/{{ cr.id }}/complete">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="form-grid">
+            <div class="field">
+              <label for="location">Location</label>
+              <input id="location" name="location" type="text" maxlength="120" value="{{ d.get('location', '') }}">
+            </div>
+            <div class="field">
+              <label for="employment_type">Employment type</label>
+              <select id="employment_type" name="employment_type">
+                <option value="">Keep current</option>
+                {% for item in employment_types %}
+                  <option value="{{ item.value }}" {% if d.get('employment_type') == item.value %}selected{% endif %}>{{ item.value|replace('_', ' ')|title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="department_id">Department</label>
+              <select id="department_id" name="department_id">
+                <option value="">Keep current</option>
+                {% for department in departments %}
+                  <option value="{{ department.id }}" {% if d.get('department_id') == department.id|string %}selected{% endif %}>{{ department.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="position_id">Position</label>
+              <select id="position_id" name="position_id">
+                <option value="">Keep current</option>
+                {% for position in positions %}
+                  <option value="{{ position.id }}" {% if d.get('position_id') == position.id|string %}selected{% endif %}>{{ position.title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="manager_id">Manager</label>
+              <select id="manager_id" name="manager_id">
+                <option value="">Keep current</option>
+                {% for manager in managers %}
+                  {% if not employee or manager.id != employee.id %}
+                    <option value="{{ manager.id }}" {% if d.get('manager_id') == manager.id|string %}selected{% endif %}>{{ manager.full_name }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="status">Employment status</label>
+              <select id="status" name="status">
+                <option value="">Keep current</option>
+                {% for item in employee_statuses %}
+                  <option value="{{ item.value }}" {% if d.get('status') == item.value %}selected{% endif %}>{{ item.value|replace('_', ' ')|title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn" type="submit">Complete and apply</button>
+            <span class="hint">This closes the request and cannot be undone.</span>
+          </div>
+        </form>
+      </div>
+    {% endif %}
+
+    {% if employee and employee_history %}
+      <div class="card">
+        <div class="card__header">
+          <h2>Other requests for {{ employee.first_name }}</h2>
+          <span class="spacer"></span>
+          <a class="btn btn--ghost btn--sm" href="/employees/{{ employee.id }}">Employee record</a>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Request</th><th>Type</th><th>Effective</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for item in employee_history %}
+              <tr>
+                <td><a href="/lifecycle/{{ item.id }}">{{ item.code }}</a></td>
+                <td>{{ item.change_type.value|replace('_', ' ')|title }}</td>
+                <td class="nowrap">{{ item.effective_date|date }}</td>
+                <td><span class="badge badge--{{ item.status.value }}">{{ status_labels[item.status.value] }}</span></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h2>Actions</h2></div>
+
+      {% if cr.status == 'draft' and can_manage %}
+        <form method="post" action="/lifecycle/{{ cr.id }}/submit">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button class="btn" type="submit" style="width: 100%;" {% if not cr.employee_id %}disabled{% endif %}>Submit for approval</button>
+        </form>
+        {% if not cr.employee_id %}
+          <p class="hint">Link an employee before submitting.</p>
+        {% endif %}
+        <div class="row section">
+          <a class="btn btn--ghost btn--sm" href="/lifecycle/{{ cr.id }}/edit">Edit draft</a>
+          <form method="post" action="/lifecycle/{{ cr.id }}/cancel" class="inline-form" data-confirm="Cancel this change request?">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button class="btn btn--ghost btn--sm" type="submit">Cancel</button>
+          </form>
+        </div>
+      {% elif cr.status == 'pending_approval' %}
+        {% if can_approve %}
+          <form method="post" action="/lifecycle/{{ cr.id }}/approve">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button class="btn" type="submit" style="width: 100%;">Approve request</button>
+          </form>
+          <form method="post" action="/lifecycle/{{ cr.id }}/reject" class="section">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <div class="field">
+              <label for="reject_reason">Rejection reason</label>
+              <input id="reject_reason" name="reason" type="text" maxlength="2000" placeholder="Why is this request being rejected?">
+            </div>
+            <button class="btn btn--ghost" type="submit" style="width: 100%; margin-top: .5rem;">Reject request</button>
+          </form>
+        {% else %}
+          <p class="muted small">This request is waiting for an HR decision.</p>
+        {% endif %}
+        {% if can_manage %}
+          <div class="row section">
+            <form method="post" action="/lifecycle/{{ cr.id }}/cancel" class="inline-form" data-confirm="Withdraw this change request?">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <button class="btn btn--ghost btn--sm" type="submit">Withdraw</button>
+            </form>
+          </div>
+        {% endif %}
+      {% elif cr.status == 'approved' %}
+        <p class="muted small">Approved. Use the completion form to apply the change to the employee record.</p>
+      {% else %}
+        <p class="muted small">This request is {{ status_labels[cr.status]|lower }} and has no further actions.</p>
+      {% endif %}
+    </div>
+
+    {% if employee %}
+      <div class="card">
+        <div class="card__header"><h3>Employee</h3></div>
+        <div class="kv"><span>Name</span><strong>{{ employee.full_name }}</strong></div>
+        <div class="kv"><span>Employee no.</span><strong>{{ employee.employee_no }}</strong></div>
+        <div class="kv"><span>Department</span><strong>{{ employee.department.name if employee.department else '—' }}</strong></div>
+        <div class="kv"><span>Position</span><strong>{{ employee.position.title if employee.position else '—' }}</strong></div>
+        <div class="kv"><span>Manager</span><strong>{{ employee.manager.full_name if employee.manager else '—' }}</strong></div>
+        <div class="kv"><span>Location</span><strong>{{ employee.location or '—' }}</strong></div>
+        <div class="kv"><span>Status</span><strong><span class="badge badge--{{ employee.status.value }}">{{ employee.status.value|replace('_', ' ')|title }}</span></strong></div>
+        <div class="section">
+          <a class="btn btn--ghost btn--sm" href="/employees/{{ employee.id }}">Open employee record</a>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>Workflow</h3></div>
+      <ul class="timeline">
+        <li>
+          <span class="tl-dot" aria-hidden="true"></span>
+          <div><strong>Created</strong><small>{{ cr.created_at|datetime }}</small></div>
+        </li>
+        {% if cr.status != 'draft' %}
+          <li>
+            <span class="tl-dot" aria-hidden="true"></span>
+            <div><strong>Submitted for approval</strong><small>Routed to HR</small></div>
+          </li>
+        {% endif %}
+        {% if cr.status in ('approved', 'completed') %}
+          <li>
+            <span class="tl-dot" aria-hidden="true"></span>
+            <div><strong>Approved</strong><small>{{ cr.approved_at|datetime }}</small></div>
+          </li>
+        {% endif %}
+        {% if cr.status == 'rejected' %}
+          <li>
+            <span class="tl-dot" aria-hidden="true"></span>
+            <div><strong>Rejected</strong><small>{{ cr.reason or 'No reason recorded' }}</small></div>
+          </li>
+        {% endif %}
+        {% if cr.status == 'cancelled' %}
+          <li>
+            <span class="tl-dot" aria-hidden="true"></span>
+            <div><strong>Cancelled</strong><small>Withdrawn before completion</small></div>
+          </li>
+        {% endif %}
+        {% if cr.status == 'completed' %}
+          <li>
+            <span class="tl-dot" aria-hidden="true"></span>
+            <div><strong>Completed</strong><small>Applied to the employee record</small></div>
+          </li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

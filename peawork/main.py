@@ -28,8 +28,12 @@ from .web import admin as web_admin
 from .web import auth as web_auth
 from .web import dashboard as web_dashboard
 from .web import employees as web_employees
+from .web import job_changes as web_job_changes
+from .web import journeys as web_journeys
 from .web import leave as web_leave
+from .web import lifecycle as web_lifecycle
 from .web import org as web_org
+from .web import talent as web_talent
 
 log = logging.getLogger("peawork")
 
@@ -105,6 +109,10 @@ def create_app() -> FastAPI:
     app.include_router(web_auth.router)
     app.include_router(web_dashboard.router)
     app.include_router(web_employees.router)
+    app.include_router(web_lifecycle.router)
+    app.include_router(web_job_changes.router)
+    app.include_router(web_journeys.router)
+    app.include_router(web_talent.router)
     app.include_router(web_leave.router)
     app.include_router(web_org.router)
     app.include_router(web_admin.router)

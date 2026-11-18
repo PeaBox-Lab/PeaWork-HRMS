@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ row.code }} — PeaWork HRMS{% endblock %}
+{% block heading %}Job change{% endblock %}
+{% block subheading %}{{ row.code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ row.event_label }} <span class="badge badge--{{ row.status }}">{{ status_labels[row.status] }}</span></h1>
+    <p>{{ row.reason_label }}{% if employee %} · {{ employee.full_name }} ({{ employee.employee_no }}){% endif %}</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/job-changes">All job changes</a>
+    {% if row.status == 'draft' and can_manage %}
+      <form method="post" action="/job-changes/{{ row.id }}/submit" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn" type="submit">Submit for approval</button>
+      </form>
+    {% endif %}
+    {% if can_approve %}
+      <form method="post" action="/job-changes/{{ row.id }}/approve" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn" type="submit">Approve</button>
+      </form>
+    {% endif %}
+    {% if is_hr and row.status in ('draft', 'pending_approval') %}
+      <form method="post" action="/job-changes/{{ row.id }}/reject" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="reason" value="Rejected from job change review">
+        <button class="btn btn--ghost" type="submit">Reject</button>
+      </form>
+    {% endif %}
+    {% if can_manage and row.status not in ('completed', 'cancelled', 'rejected') %}
+      <form method="post" action="/job-changes/{{ row.id }}/cancel" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn btn--ghost" type="submit">Cancel</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid grid--main">
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h2>Current → proposed</h2></div>
+      {% set current = row.current_snapshot or {} %}
+      {% set proposed = row.proposed_snapshot or {} %}
+      {% if proposed %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Field</th><th>Current</th><th>Proposed</th></tr></thead>
+            <tbody>
+            {% for field, value in proposed.items() %}
+              <tr>
+                <td>{{ field_labels.get(field, field|replace('_', ' ')|title) }}</td>
+                <td class="muted">{{ current.get(field) or '—' }}</td>
+                <td><strong>{{ value or '—' }}</strong></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">No proposed field values recorded.</div>
+      {% endif %}
+    </div>
+
+    {% if row.notes %}
+      <div class="card">
+        <div class="card__header"><h3>Notes</h3></div>
+        <p class="muted">{{ row.notes }}</p>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h3>Timing</h3></div>
+      <dl class="meta">
+        <dt>Raised</dt><dd>{{ row.transaction_date|date if row.transaction_date else row.created_at|date }}</dd>
+        <dt>Effective</dt><dd>{{ row.effective_date|date }}</dd>
+        <dt>Approved</dt><dd>{{ row.approved_at|date if row.approved_at else 'Not yet' }}</dd>
+        <dt>Applied</dt><dd>{{ row.applied_at|date if row.applied_at else 'Not yet' }}</dd>
+      </dl>
+      {% if row.status == 'approved' %}
+        <p class="muted small">Approved. It will be applied on {{ row.effective_date|date }} (or from the job-changes list with “Apply due changes”).</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h3>Approval chain</h3></div>
+      <ul class="timeline">
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Manager</strong><small>{% if row.approval_step in ('hr', 'done') %}Approved or not required{% else %}Awaiting review{% endif %}</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>HR</strong><small>{% if row.status in ('approved', 'completed') %}Approved{% else %}Awaiting HR{% endif %}</small></div></li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

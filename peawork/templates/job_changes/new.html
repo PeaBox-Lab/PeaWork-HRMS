@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}New job change — PeaWork HRMS{% endblock %}
+{% block heading %}Job changes{% endblock %}
+{% block subheading %}New request{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Raise a job change</h1>
+    <p>Pick the event first — the reason list and the fields you can change follow from it.</p>
+  </div>
+  <div class="actions"><a class="btn btn--ghost" href="/job-changes">Back to job changes</a></div>
+</div>
+
+{% if error %}<div class="alert alert--danger" role="alert"><span>{{ error }}</span></div>{% endif %}
+
+<div class="grid grid--main">
+  <div class="card">
+    <div class="card__header"><h2>1. What is changing?</h2></div>
+    <form class="filters" method="get" action="/job-changes/new">
+      <div class="field">
+        <label for="employee_id">Employee</label>
+        <select id="employee_id" name="employee_id" onchange="this.form.submit()">
+          <option value="">Choose an employee</option>
+          {% for emp in employees %}
+            <option value="{{ emp.id }}" {% if selected_employee == emp.id|string %}selected{% endif %}>{{ emp.full_name }} ({{ emp.employee_no }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="event">Event</label>
+        <select id="event" name="event" onchange="this.form.submit()">
+          {% for value, label in events %}
+            <option value="{{ value }}" {% if selected_event == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><button class="btn btn--ghost btn--sm" type="submit">Load</button></noscript>
+    </form>
+
+    <form method="post" action="/job-changes/new" class="section">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="employee_id" value="{{ selected_employee }}">
+      <input type="hidden" name="event" value="{{ selected_event }}">
+
+      <div class="field">
+        <label for="reason_code">Reason <span class="muted small">(required)</span></label>
+        <select id="reason_code" name="reason_code" required>
+          {% for value, label in reasons %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="effective_date">Effective date</label>
+        <input id="effective_date" name="effective_date" type="date" value="{{ today }}" required>
+        <small class="muted">The employee record changes on this date, not when the request is approved.</small>
+      </div>
+
+      <h3 class="section">2. Proposed values</h3>
+      {% if 'department_id' in fields %}
+        <div class="field">
+          <label for="department_id">Department</label>
+          <select id="department_id" name="department_id">
+            <option value="">No change</option>
+            {% for dept in departments %}
+              <option value="{{ dept.id }}" {% if values.get('department_id') == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      {% if 'position_id' in fields %}
+        <div class="field">
+          <label for="position_id">Position</label>
+          <select id="position_id" name="position_id">
+            <option value="">No change</option>
+            {% for pos in positions %}
+              <option value="{{ pos.id }}" {% if values.get('position_id') == pos.id|string %}selected{% endif %}>{{ pos.title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      {% if 'manager_id' in fields %}
+        <div class="field">
+          <label for="manager_id">Manager</label>
+          <select id="manager_id" name="manager_id">
+            <option value="">No change</option>
+            {% for emp in employees %}
+              <option value="{{ emp.id }}" {% if values.get('manager_id') == emp.id|string %}selected{% endif %}>{{ emp.full_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      {% if 'location' in fields %}
+        <div class="field">
+          <label for="location">Location</label>
+          <input id="location" name="location" type="text" value="{{ values.get('location', '') }}" placeholder="No change">
+        </div>
+      {% endif %}
+      {% if 'employment_type' in fields %}
+        <div class="field">
+          <label for="employment_type">Employment type</label>
+          <select id="employment_type" name="employment_type">
+            <option value="">No change</option>
+            {% for value, label in employment_types %}
+              <option value="{{ value }}" {% if values.get('employment_type') == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      {% if 'status' in fields %}
+        <div class="field">
+          <label for="status">Employment status</label>
+          <select id="status" name="status">
+            <option value="">No change</option>
+            <option value="notice">Notice</option>
+            <option value="exited">Exited</option>
+            <option value="active">Active</option>
+          </select>
+        </div>
+      {% endif %}
+      {% if 'work_email' in fields %}
+        <div class="field">
+          <label for="work_email">Work email</label>
+          <input id="work_email" name="work_email" type="email" value="{{ values.get('work_email', '') }}">
+        </div>
+      {% endif %}
+      {% if 'personal_email' in fields %}
+        <div class="field">
+          <label for="personal_email">Personal email</label>
+          <input id="personal_email" name="personal_email" type="email" value="{{ values.get('personal_email', '') }}">
+        </div>
+      {% endif %}
+      {% if 'phone' in fields %}
+        <div class="field">
+          <label for="phone">Phone</label>
+          <input id="phone" name="phone" type="text" value="{{ values.get('phone', '') }}">
+        </div>
+      {% endif %}
+
+      <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="3" placeholder="Context for the approvers"></textarea>
+      </div>
+
+      <div class="actions">
+        <button class="btn" type="submit">Save draft</button>
+        <a class="btn btn--ghost" href="/job-changes">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card__header"><h3>What happens next</h3></div>
+    <ul class="timeline">
+      <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Draft</strong><small>Review the current → proposed comparison before submitting.</small></div></li>
+      <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Approval</strong><small>The manager sees it first; HR then approves.</small></div></li>
+      <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Applied</strong><small>On the effective date the employee record and job history are updated.</small></div></li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

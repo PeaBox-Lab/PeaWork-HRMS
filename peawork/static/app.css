@@ -186,6 +186,9 @@ table.data .name small { color: var(--muted); }
 .badge--pending, .badge--probation, .badge--half_day, .badge--notice { background: var(--warn-soft); color: var(--warn); }
 .badge--rejected, .badge--exited, .badge--absent { background: var(--danger-soft); color: var(--danger); }
 .badge--cancelled, .badge--on_leave, .badge--leave { background: #eef2ff; color: #4338ca; }
+.badge--draft { background: #f1f5f9; color: #334155; }
+.badge--pending_approval { background: var(--warn-soft); color: var(--warn); }
+.badge--completed { background: var(--ok-soft); color: var(--ok); }
 .badge--admin { background: #fdf2f8; color: #be185d; }
 .badge--hr { background: #eff6ff; color: #1d4ed8; }
 .badge--manager { background: #f0fdfa; color: #0f766e; }

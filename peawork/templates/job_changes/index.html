@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Job changes — PeaWork HRMS{% endblock %}
+{% block heading %}Job changes{% endblock %}
+{% block subheading %}{{ total }} recorded{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Job changes</h1>
+    <p>Promotions, transfers, demotions and data changes, with a reason, an effective date and approvals.</p>
+  </div>
+  <div class="actions">
+    {% if is_hr %}
+      <form method="post" action="/job-changes/apply-due">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn btn--ghost" type="submit">Apply due changes</button>
+      </form>
+    {% endif %}
+    {% if not is_read_only %}
+      <a class="btn" href="/job-changes/new">Raise a job change</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid grid--4">
+  <div class="card stat">
+    <span class="stat__label">Draft</span>
+    <span class="stat__value">{{ counts['draft'] }}</span>
+    <span class="stat__hint">Not submitted</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Awaiting approval</span>
+    <span class="stat__value">{{ counts['pending_approval'] }}</span>
+    <span class="stat__hint">Manager or HR decision</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Approved</span>
+    <span class="stat__value">{{ counts['approved'] }}</span>
+    <span class="stat__hint">Applies on the effective date</span>
+  </div>
+  <div class="card stat">
+    <span class="stat__label">Applied</span>
+    <span class="stat__value">{{ counts['completed'] }}</span>
+    <span class="stat__hint">Employee record updated</span>
+  </div>
+</div>
+
+<div class="grid grid--main section">
+  <div class="card">
+    <div class="card__header">
+      <h2>All job changes</h2>
+      <span class="spacer"></span>
+      <span class="muted small">{{ rows|length }} shown</span>
+    </div>
+    <form class="filters" method="get" action="/job-changes">
+      <div class="field">
+        <label for="status">Status</label>
+        <select id="status" name="status" onchange="this.form.submit()">
+          <option value="">All statuses</option>
+          {% for value, label in status_labels.items() %}
+            <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="event">Event</label>
+        <select id="event" name="event" onchange="this.form.submit()">
+          <option value="">All events</option>
+          {% for value, label in events %}
+            <option value="{{ value }}" {% if event == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><button class="btn btn--ghost btn--sm" type="submit">Apply filters</button></noscript>
+    </form>
+
+    {% if rows %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Request</th><th>Employee</th><th>Event</th><th>Reason</th><th>Effective</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                <a href="/job-changes/{{ row.id }}"><strong>{{ row.code }}</strong></a><br>
+                <small class="muted">{{ row.proposed_snapshot|length if row.proposed_snapshot else 0 }} field change(s)</small>
+              </td>
+              <td class="nowrap">
+                {% set emp = employees_by_id.get(row.employee_id) %}
+                {% if emp %}
+                  {{ emp.full_name }}<br><small class="muted">{{ emp.employee_no }}</small>
+                {% else %}
+                  <span class="muted">Unlinked</span>
+                {% endif %}
+              </td>
+              <td>{{ row.event_label }}</td>
+              <td>{{ row.reason_label }}</td>
+              <td class="nowrap">{{ row.effective_date|date }}</td>
+              <td><span class="badge badge--{{ row.status }}">{{ status_labels[row.status] }}</span></td>
+              <td class="right"><a class="btn btn--ghost btn--sm" href="/job-changes/{{ row.id }}">Open</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">
+        <strong>No job changes match this view</strong>
+        Raise a promotion, transfer or data change to start the approval workflow.
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="card__header"><h3>How it works</h3></div>
+      <ul class="timeline">
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Draft</strong><small>Choose the event and reason, then compare current and proposed values.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Manager approval</strong><small>The employee's manager reviews first, then HR signs off.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Effective date</strong><small>An approved change is applied on its effective date, not on the day it was approved.</small></div></li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card__header"><h3>Separate modules</h3></div>
+      <p class="muted small">Onboarding and exits have their own checklists. Use those modules for joiners and leavers.</p>
+      <div class="actions">
+        <a class="btn btn--ghost btn--sm" href="/onboarding">Onboarding</a>
+        <a class="btn btn--ghost btn--sm" href="/offboarding">Offboarding</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

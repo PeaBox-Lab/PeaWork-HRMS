@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Offboarding — {{ separation.employee_name }}{% endblock %}
+{% block heading %}Lifecycle{% endblock %}
+{% block subheading %}Offboarding{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ separation.employee_name }} <span class="badge badge--{{ separation.status }}">{{ separation.status_label }}</span></h1>
+    <p>{{ separation.exit_type_label }} · last working day {{ separation.last_working_day|date }}</p>
+  </div>
+  <div class="actions"><a class="btn btn--ghost" href="/offboarding">All separations</a></div>
+</div>
+
+<div class="grid grid--main">
+  <div class="stack">
+    <div class="card">
+      <div class="card__header">
+        <h2>Clearance checklist</h2>
+        <span class="spacer"></span>
+        {% if journey %}<span class="muted small">{{ journey.tasks|length - journey.open_tasks|length }}/{{ journey.tasks|length }} done</span>{% endif %}
+      </div>
+      {% if journey and journey.tasks %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            {% for task in journey.tasks %}
+              <tr>
+                <td><strong>{{ task.name }}</strong>{% if not task.required %}<small class="muted"> · optional</small>{% endif %}</td>
+                <td>{{ task.owner_label }}</td>
+                <td class="nowrap">{{ task.due_on|date if task.due_on else '—' }}</td>
+                <td><span class="badge badge--{{ 'approved' if task.status == 'done' else task.status }}">{{ task.status_label }}</span></td>
+                <td class="right nowrap">
+                  {% if task.status not in ('done', 'skipped') %}
+                    <form method="post" action="/offboarding/{{ separation.id }}/tasks/{{ task.id }}/complete" class="inline-form">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                      <button class="btn btn--sm" type="submit">Complete</button>
+                    </form>
+                    {% if is_hr %}
+                      <form method="post" action="/offboarding/{{ separation.id }}/tasks/{{ task.id }}/skip" class="inline-form">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <button class="btn btn--ghost btn--sm" type="submit">Skip</button>
+                      </form>
+                    {% endif %}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty">No checklist attached to this separation.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header"><h3>Case details</h3></div>
+      <dl class="meta">
+        <dt>Exit type</dt><dd>{{ exit_type_labels.get(separation.exit_type, separation.exit_type) }}</dd>
+        <dt>Notice date</dt><dd>{{ separation.notice_date|date if separation.notice_date else '—' }}</dd>
+        <dt>Last working day</dt><dd>{{ separation.last_working_day|date }}</dd>
+        <dt>Rehire eligible</dt><dd>{{ 'Yes' if separation.rehire_eligible else 'No' }}</dd>
+        <dt>Exit interview</dt><dd>{{ 'Completed' if separation.exit_interview_done else 'Not done' }}</dd>
+        <dt>Final pay</dt><dd>{{ 'Ready' if separation.final_pay_ready else 'Not ready' }}</dd>
+      </dl>
+      {% if separation.notes %}<p class="muted small">{{ separation.notes }}</p>{% endif %}
+    </div>
+  </div>
+
+  <div class="stack">
+    {% if is_hr and next_status %}
+      <div class="card">
+        <div class="card__header"><h2>Next step</h2></div>
+        <p class="muted small">Move this case to <strong>{{ separation_status_labels.get(next_status, next_status) }}</strong>.</p>
+        <form method="post" action="/offboarding/{{ separation.id }}/advance">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="status" value="{{ next_status }}">
+          <div class="field">
+            <label class="check">
+              <input type="checkbox" name="exit_interview_done" value="1" {% if separation.exit_interview_done %}checked{% endif %}>
+              <span>Exit interview completed</span>
+            </label>
+          </div>
+          <div class="field">
+            <label class="check">
+              <input type="checkbox" name="final_pay_ready" value="1" {% if separation.final_pay_ready %}checked{% endif %}>
+              <span>Final pay ready</span>
+            </label>
+          </div>
+          <div class="field">
+            <label class="check">
+              <input type="checkbox" name="rehire_eligible" value="1" {% if separation.rehire_eligible %}checked{% endif %}>
+              <span>Eligible for rehire</span>
+            </label>
+          </div>
+          <button class="btn" type="submit" style="width: 100%;">Move to {{ separation_status_labels.get(next_status, next_status) }}</button>
+        </form>
+        {% if next_status == 'exited' %}
+          <p class="muted small">Final pay must be marked ready before the employee can be exited.</p>
+        {% endif %}
+      </div>
+    {% elif is_hr and separation.status != 'exited' %}
+      <div class="card">
+        <div class="card__header"><h2>Closed case</h2></div>
+        <p class="muted small">No further action is available for this separation.</p>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card__header"><h3>Offboarding flow</h3></div>
+      <ul class="timeline">
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Notice</strong><small>Exit recorded; letter issued; employee status set to notice.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Clearance</strong><small>Handover, equipment and access checklist.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Final pay</strong><small>Leave encashment and payroll hand-off confirmed.</small></div></li>
+        <li><span class="tl-dot" aria-hidden="true"></span><div><strong>Exited</strong><small>Employee record closed; directory access removed.</small></div></li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

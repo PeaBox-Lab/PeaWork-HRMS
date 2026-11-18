@@ -31,6 +31,23 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0zM4 21a8 8 0 0 1 16 0z"/></svg>
           <span>People</span>
         </a>
+        <p class="nav__label">Lifecycle</p>
+        <a class="nav__link {% if request.url.path.startswith('/onboarding') %}is-active{% endif %}" href="/onboarding">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 8l7-5 7 5M7 21h10M9 13h6"/></svg>
+          <span>Onboarding</span>
+        </a>
+        <a class="nav__link {% if request.url.path.startswith('/job-changes') %}is-active{% endif %}" href="/job-changes">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10l-3-3M20 17H10l3 3M14 7a3 3 0 1 1 6 0M4 17a3 3 0 1 0 6 0"/></svg>
+          <span>Job changes</span>
+        </a>
+        <a class="nav__link {% if request.url.path.startswith('/offboarding') %}is-active{% endif %}" href="/offboarding">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6l2 2h8v11H4zM10 14h6M13 11l3 3-3 3"/></svg>
+          <span>Offboarding</span>
+        </a>
+        <a class="nav__link {% if request.url.path == '/lifecycle' or request.url.path.startswith('/lifecycle/') %}is-active{% endif %}" href="/lifecycle">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6l2 2h8v11H4zM8 13h8M8 17h5"/></svg>
+          <span>All requests</span>
+        </a>
         <a class="nav__link {% if request.url.path.startswith('/leave') and request.url.path != '/leave/calendar' %}is-active{% endif %}" href="/leave">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm4 8h2v2H9zm4 0h2v2h-2z"/></svg>
           <span>Leave</span>

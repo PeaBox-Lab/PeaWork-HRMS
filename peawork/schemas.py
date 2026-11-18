@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -457,6 +457,7 @@ class ChangeRequestCreate(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     old_value: str | None = Field(default=None, max_length=4000)
     new_value: str | None = Field(default=None, max_length=4000)
+    details: dict[str, Any] | None = None
     notes: str | None = Field(default=None, max_length=2000)
 
     @field_validator("code")
@@ -476,6 +477,7 @@ class ChangeRequestOut(ORMModel):
     description: str | None
     old_value: str | None
     new_value: str | None
+    details: dict[str, Any] | None
     notes: str | None
     reason: str | None
     actor_id: UUID | None
@@ -485,8 +487,17 @@ class ChangeRequestOut(ORMModel):
 
 
 class ChangeRequestUpdate(BaseModel):
+    employee_id: UUID | None = None
+    effective_date: date | None = None
     description: str | None = Field(default=None, max_length=2000)
     old_value: str | None = Field(default=None, max_length=4000)
     new_value: str | None = Field(default=None, max_length=4000)
+    details: dict[str, Any] | None = None
     notes: str | None = Field(default=None, max_length=2000)
     reason: str | None = Field(default=None, max_length=2000)
+
+
+class ChangeRequestComplete(BaseModel):
+    """Optional overrides merged over the request's stored details on completion."""
+
+    details: dict[str, Any] | None = None

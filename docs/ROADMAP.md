@@ -267,16 +267,21 @@ Remaining (next R4 iterations):
 
 ### Lifecycle Change Requests — In Progress
 
-> **Scaffolding + draft workflow completed (2026-11-18)** — Migration `a3b7c1d2e4f5_employee_lifecycle_change_requests.py` (down_revision `f4324d9c1355`), followed by `b2c3d4e5f6g7_make_employee_id_nullable_v2.py` and `c4d5e6f7g8h9_add_reason_to_change_requests.py`. `alembic check` clean, `tests/v2` 308 passed, coverage 82%, `ruff check peawork/ tests/v2/` clean.
+> **Scaffolding + draft workflow completed (2026-11-18)** — Migrations `a3b7c1d2e4f5_employee_lifecycle_change_requests.py` (down_revision `f4324d9c1355`), `b2c3d4e5f6g7_make_employee_id_nullable_v2.py`, `c4d5e6f7g8h9_add_reason_to_change_requests.py`, `d5e6f7g8h9i0_add_details_to_change_requests.py`. `alembic check` clean, `tests/v2` 340 passed, coverage 82%, `ruff check peawork/ tests/v2/` clean.
+>
+> **Role-aware authorization + web UI (2026-11-18)** — Service-layer, field-level policy: admin/HR act on any employee and any writable column; managers act on self + direct reports but cannot apply HR-only fields; employees act on self-service fields only (`location`, `phone`, `personal_email`, `gender`, `date_of_birth`); auditor/payroll are read-only. Approve/reject stay HR-only; unauthorised reads return 404 to avoid leaking existence. Server-rendered GUI shipped at `/lifecycle` (queue, filters, stats), `/lifecycle/new`, `/lifecycle/{id}` (detail, workflow actions, completion form), `/lifecycle/{id}/edit`. Tests: `test_lifecycle.py` 27 + `test_lifecycle_web.py` 16.
 
 Implemented:
-- [x] `ChangeRequest` model + `ChangeRequestStatus`/`ChangeRequestType` enums.
-- [x] Effective-dated request API: `POST/GET /api/v1/lifecycle`, `GET/POST /{id}/approve|reject|cancel`.
-- [x] Service: create/list/get/approve/reject/cancel/apply with auditing, role scoping, and workflow gates.
-- [x] Tests: `tests/v2/test_lifecycle.py` (10 tests covering create/list/get/filter/approve/reject/cancel/role-scoping/valid change types).
-- [ ] Apply-approved-request path (`apply_change_request`) and EmployeeHistory detail-linking.
-- [ ] `ChangeRequestUpdate` schema wiring (edit/update draft fields).
-- [ ] Role-aware per-field authorization for employee_id/self-service edits.
+- [x] `ChangeRequest` model + `ChangeRequestStatus`/`ChangeRequestType` enums (`details` JSON payload, nullable employee link).
+- [x] Effective-dated request API: `POST/GET /api/v1/lifecycle`, `GET /{id}`, `PATCH /{id}`, `POST /{id}/submit|approve|reject|cancel|complete`.
+- [x] Service: create/list/get/update/submit/approve/reject/cancel/complete with auditing, role scoping, and workflow gates.
+- [x] Completion applies an approved request to the employee record (whitelisted writable columns, referential validation) and appends `EmployeeHistory`; default transitions for resignation (`notice`) and rehire (`active`).
+- [x] Role-aware per-field authorization: `SELF_SERVICE_FIELDS` vs `HR_ONLY_FIELDS`, `can_view_change_request` / `can_manage_change_request`, self-service default target, manager scope includes direct reports, non-HR cannot reassign the employee, HR-only fields rejected with 403 at completion.
+- [x] Web UI (`peawork/web/lifecycle.py` + 4 templates): stats, pending-approval queue, filterable request table, create page, detail page with submit/approve/reject/withdraw and completion form, draft edit form.
+- [x] Tests: `tests/v2/test_lifecycle.py` (27: create/list/get/filter/update/submit/approve/reject/cancel/complete/validation plus the authorization matrix) and `tests/v2/test_lifecycle_web.py` (16: queue rendering, filters, create/edit, workflow actions, completion, employee self-service restrictions).
+- [ ] Dedicated handlers for project assignment, cost-centre and leave/timesheet/attendance changes (currently history-only).
+- [ ] Per-field self-service edit forms (web form currently exposes location only; other self-service fields are API-only).
+- [ ] Effective-dated future scheduling (apply pending changes on their effective date rather than on completion).
 
 ---
 

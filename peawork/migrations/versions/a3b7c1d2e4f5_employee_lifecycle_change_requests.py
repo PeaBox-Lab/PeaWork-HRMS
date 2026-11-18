@@ -31,6 +31,7 @@ def upgrade() -> None:
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('old_value', sa.Text(), nullable=True),
     sa.Column('new_value', sa.Text(), nullable=True),
+    sa.Column('details', sa.JSON(), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('actor_id', sa.Uuid(), nullable=True),
