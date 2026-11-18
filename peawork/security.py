@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -99,3 +101,95 @@ def client_ip(request: Request) -> str | None:
         if real_ip:
             return real_ip.strip()[:64]
     return request.client.host[:64] if request.client else None
+
+
+# ---------------------------------------------------------------------------
+# TOTP (Time-based One-Time Password) per RFC 6238
+# ---------------------------------------------------------------------------
+
+def _base32_decode(secret: str) -> bytes:
+    """Decode a base32-encoded secret key."""
+    return base64.b32decode(secret.upper())
+
+
+def compute_totp(secret: str, interval: int = 30, digits: int = 6) -> str:
+    """Compute a TOTP value per RFC 6238.
+
+    Args:
+        secret: Base32-encoded secret key
+        interval: Time step in seconds (default 30)
+        digits: Number of digits in the OTP (default 6)
+
+    Returns:
+        A string of <digits> numeric characters.
+    """
+    secret_bytes = _base32_decode(secret)
+    steps = int(time.time()) // interval
+    counter = steps.to_bytes(8, byteorder="big")
+    hmac_sha1 = hmac.new(secret_bytes, counter, hashlib.sha1).digest()
+    offset = hmac_sha1[-1] & 0xF
+    code = hmac_sha1[offset:offset + 4]
+    code_int = struct.unpack(">I", code)[0]
+    code_int = code_int & 0x7FFFFFFF
+    code_int = code_int % (10 ** digits)
+    return str(code_int).zfill(digits)
+
+
+def compute_hotp(secret: str, counter: int, digits: int = 6) -> str:
+    """Compute an HOTP value per RFC 4226 (counter-based OTP).
+
+    Args:
+        secret: Base32-encoded secret key
+        counter: The counter value (incremented each use)
+        digits: Number of digits in the OTP (default 6)
+
+    Returns:
+        A string of <digits> numeric characters.
+    """
+    secret_bytes = _base32_decode(secret)
+    counter_bytes = counter.to_bytes(8, byteorder="big")
+    hmac_sha1 = hmac.new(secret_bytes, counter_bytes, hashlib.sha1).digest()
+    offset = hmac_sha1[-1] & 0xF
+    code = hmac_sha1[offset:offset + 4]
+    code_int = struct.unpack(">I", code)[0]
+    code_int = code_int & 0x7FFFFFFF
+    code_int = code_int % (10 ** digits)
+    return str(code_int).zfill(digits)
+
+
+def generate_backup_codes(count: int = 8, digits: int = 8) -> List[str]:
+    """Generate a list of one-time backup codes for account recovery.
+
+    Args:
+        count: Number of backup codes to generate (default 8)
+        digits: Number of digits per code (default 8)
+
+    Returns:
+        A list of random digit strings.
+    """
+    codes = []
+    alphabet = "0123456789"
+    for _ in range(count):
+        code = "".join(secrets.choice(alphabet) for _ in range(digits))
+        codes.append(code)
+    return codes
+
+
+# ---------------------------------------------------------------------------
+# Exported symbols
+# ---------------------------------------------------------------------------
+
+__all__ = [
+    "hash_password",
+    "verify_password",
+    "password_needs_rehash",
+    "password_problems",
+    "generate_password",
+    "new_token",
+    "hash_token",
+    "constant_time_equals",
+    "client_ip",
+    "compute_totp",
+    "compute_hotp",
+    "generate_backup_codes",
+]
