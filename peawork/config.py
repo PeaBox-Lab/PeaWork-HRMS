@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     sso_scope: str = "openid profile email"
     sso_session_timeout_minutes: int = 60
 
+    # R5 — Tenancy
+    tenancy_enabled: bool = False
+    tenancy_mode: str | None = None  # "database-per-tenant" | "postgres-rls"
+    tenant_resolver: str | None = None  # dotted path to callable that resolves tenant from request
+    tenant_id_column: str = "tenant_id"  # column name on tenant-editable tables
+
     # Background jobs (R2+)
     redis_url: str | None = None
 
