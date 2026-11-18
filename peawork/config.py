@@ -61,6 +61,19 @@ class Settings(BaseSettings):
         "application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+    # R5 — Object storage (MinIO / S3)
+    object_storage_enabled: bool = False
+    object_storage_provider: str | None = None  # "minio" | "s3"
+    object_storage_endpoint: str | None = None      # MinIO URL or S3 endpoint
+    object_storage_access_key: str | None = None    # sensitive: rotate in CI
+    object_storage_secret_key: str | None = None    # sensitive: rotate in CI
+    object_storage_bucket: str | None = None        # default bucket name
+    object_storage_region: str | None = None        # e.g. "us-east-1", "ap-south-1"
+    object_storage_secure: bool | None = None       # HTTPS for S3/MinIO
+    object_storage_cdndomain: str | None = None     # custom CDN domain
+    object_storage_encrypt_at_rest: bool = True     # SSE-S3 or SSE-KMS
+    object_storage_acl: str = "private"             # Canned ACL for objects
+
     # Observability
     metrics_token: str | None = None
     log_level: str = "INFO"
