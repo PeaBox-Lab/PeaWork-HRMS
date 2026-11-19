@@ -19,7 +19,7 @@ from ..domain import (
     FeedbackStatus,
     Role,
 )
-from ..models import Employee, ReviewCheckIn, ReviewCycle, User, utcnow
+from ..models import Employee, FeedbackRequest, ReviewCheckIn, ReviewCycle, User, utcnow
 from ..services import audit
 from ..services.errors import ForbiddenError, NotFoundError, ValidationError
 from ..services.jobs import enqueue as _job_enqueue

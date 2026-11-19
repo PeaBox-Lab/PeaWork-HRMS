@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import struct
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -157,7 +158,7 @@ def compute_hotp(secret: str, counter: int, digits: int = 6) -> str:
     return str(code_int).zfill(digits)
 
 
-def generate_backup_codes(count: int = 8, digits: int = 8) -> List[str]:
+def generate_backup_codes(count: int = 8, digits: int = 8) -> list[str]:
     """Generate a list of one-time backup codes for account recovery.
 
     Args:
@@ -187,8 +188,6 @@ def enforce_mfa(user) -> bool:
     - Users with mfa_enabled=true must complete MFA on next login.
     - Users without mfa_enabled are exempt unless enforced at org level.
     """
-    from .models import User as UserModel
-
     # Admins and HR are always exempt from MFA
     from .domain import Role
     if user.role in {Role.ADMIN, Role.HR}:
@@ -216,9 +215,8 @@ def verify_mfa_token(user, token: str) -> bool:
     if not user.mfa_secret:
         return False
 
-    from . import compute_totp
     expected = compute_totp(user.mfa_secret, interval=30, digits=6)
-    return expected == token
+    return hmac.compare_digest(expected, str(token))
 
 
 def generate_mfa_backup_code(user, used: bool = True) -> str | None:
@@ -242,17 +240,16 @@ def generate_mfa_backup_code(user, used: bool = True) -> str | None:
         return None
 
     if used:
-        # Remove the first code from the list
-        codes = codes[1:]
+        # Consume and return the first code.
+        code = codes.pop(0)
         user.mfa_backup_codes = json.dumps(codes)
-    else:
-        # Add a new code at the beginning
-        from . import generate_backup_codes as _generate
-        new_code = _generate(count=1, digits=6)[0]
-        codes.insert(0, new_code)
-        user.mfa_backup_codes = json.dumps(codes)
+        return code
 
-    return codes[0]
+    # Add a new code at the beginning without consuming an existing one.
+    new_code = generate_backup_codes(count=1, digits=6)[0]
+    codes.insert(0, new_code)
+    user.mfa_backup_codes = json.dumps(codes)
+    return new_code
 
 
 # ---------------------------------------------------------------------------

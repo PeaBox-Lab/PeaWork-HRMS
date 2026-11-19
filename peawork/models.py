@@ -39,10 +39,13 @@ from .domain import (
     EmployeeStatus,
     EmploymentType,
     ExitType,
+    FeedbackRelationship,
+    FeedbackStatus,
     JourneyStatus,
     JourneyTaskOwner,
     JourneyTaskStatus,
     JourneyType,
+    JobChangeEvent,
     LeaveStatus,
     NotificationKind,
     PayComponentType,
@@ -282,7 +285,9 @@ class Employee(TimestampMixin, Base):
     separation: Mapped["Separation | None"] = relationship(
         back_populates="employee", lazy="selectin", uselist=False
     )
-    journey: Mapped["Journey | None"] = relationship(lazy="selectin", uselist=False)
+    journeys: Mapped[list["Journey"]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @property
     def full_name(self) -> str:
@@ -338,6 +343,15 @@ class ChangeRequest(Base):
     change_type: Mapped[ChangeRequestType] = mapped_column(
         enum_col(ChangeRequestType), nullable=False
     )
+    event: Mapped[JobChangeEvent | None] = mapped_column(
+        enum_col(JobChangeEvent), nullable=True
+    )
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    transaction_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    current_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    proposed_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    approval_step: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[ChangeRequestStatus] = mapped_column(
         enum_col(ChangeRequestStatus), default=ChangeRequestStatus.DRAFT, nullable=False
     )
@@ -345,6 +359,7 @@ class ChangeRequest(Base):
     description: Mapped[str | None] = mapped_column(Text)
     old_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     actor_id: Mapped[UUID | None] = mapped_column(
@@ -363,198 +378,201 @@ class ChangeRequest(Base):
 
 
 # ============================================================
-# Lifecycle Journey Models (R4 Talent)
+# Lifecycle journey and separation models
 # ============================================================
+# Enums live in peawork.domain and are imported above; do not redefine them
+# here, or the ORM enum and the service-layer enum drift apart.
 
 
-class JourneyType(StrEnum):
-    ONBOARDING = "onboarding"
-    OFFBOARDING = "offboarding"
-    CROSSBOARDING = "crossboarding"
-    PROBATION = "probation"
+class Journey(TimestampMixin, Base):
+    """A lifecycle journey (onboarding, offboarding, crossboarding, probation)."""
 
-    @property
-    def label(self) -> str:
-        return {
-            "onboarding": "Onboarding",
-            "offboarding": "Offboarding",
-            "crossboarding": "Crossboarding",
-            "probation": "Probation",
-        }[self.value]
-
-
-class JourneyStatus(StrEnum):
-    DRAFT = "draft"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-
-
-class JourneyTaskOwner(StrEnum):
-    HR = "hr"
-    MANAGER = "manager"
-    IT = "it"
-    EMPLOYEE = "employee"
-    BUDDY = "buddy"
-    FINANCE = "finance"
-
-    @property
-    def label(self) -> str:
-        return {
-            "hr": "HR",
-            "manager": "Manager",
-            "it": "IT",
-            "employee": "Employee",
-            "buddy": "Buddy",
-            "finance": "Finance",
-        }[self.value]
-
-
-class JourneyTaskStatus(StrEnum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    DONE = "done"
-    SKIPPED = "skipped"
-
-
-class ExitType(StrEnum):
-    RESIGNATION = "resignation"
-    TERMINATION = "termination"
-    END_OF_CONTRACT = "end_of_contract"
-    RETIREMENT = "retirement"
-    MUTUAL_AGREEMENT = "mutual_agreement"
-
-    @property
-    def label(self) -> str:
-        return {
-            "resignation": "Resignation",
-            "termination": "Termination",
-            "end_of_contract": "End of fixed-term contract",
-            "retirement": "Retirement",
-            "mutual_agreement": "Mutual agreement",
-        }[self.value]
-
-
-class SeparationStatus(StrEnum):
-    INITIATED = "initiated"
-    NOTICE = "notice"
-    CLEARANCE = "clearance"
-    FINAL_PAY = "final_pay"
-    EXITED = "exited"
-    WITHDRAWN = "withdrawn"
-
-
-class Journey(Base):
-    """Represents a lifecycle journey for an employee."""
-    
     __tablename__ = "journeys"
-    
+    __table_args__ = (
+        Index("ix_journeys_org_employee", "org_id", "employee_id"),
+        Index("ix_journeys_org_type_status", "org_id", "journey_type", "status"),
+    )
+
     id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    employee_id: Mapped[UUID] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
-    template_id: Mapped[UUID] = mapped_column(ForeignKey("journey_templates.id", ondelete="RESTRICT"), nullable=False)
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    template_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("journey_templates.id", ondelete="SET NULL"), nullable=True
+    )
     journey_type: Mapped[JourneyType] = mapped_column(enum_col(JourneyType), nullable=False)
-    status: Mapped[JourneyStatus] = mapped_column(enum_col(JourneyStatus), default=JourneyStatus.DRAFT, nullable=False)
+    status: Mapped[JourneyStatus] = mapped_column(
+        enum_col(JourneyStatus), default=JourneyStatus.DRAFT, nullable=False
+    )
     anchor_date: Mapped[date] = mapped_column(Date, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    
-    template: Mapped["JourneyTemplate"] = relationship(back_populates="journeys", lazy="selectin")
-    tasks: Mapped[list["JourneyTask"]] = relationship(back_populates="journey", cascade="all, delete-orphan")
-    
+
+    employee: Mapped["Employee"] = relationship(back_populates="journeys", lazy="selectin")
+    template: Mapped["JourneyTemplate | None"] = relationship(
+        back_populates="journeys", lazy="selectin"
+    )
+    tasks: Mapped[list["JourneyTask"]] = relationship(
+        back_populates="journey", cascade="all, delete-orphan", passive_deletes=True
+    )
+
     def __repr__(self) -> str:
         return f"<Journey {self.id} for {self.employee_id} ({self.journey_type.value})>"
 
 
-class JourneyTask(Base):
-    """Represents an individual task within a journey."""
-    
+class JourneyTask(TimestampMixin, Base):
+    """An individual task within a journey."""
+
     __tablename__ = "journey_tasks"
-    
+    __table_args__ = (
+        Index("ix_journey_tasks_journey", "journey_id", "sort_order"),
+        Index("ix_journey_tasks_org_status", "org_id", "status"),
+    )
+
     id: Mapped[UUID] = uuid_pk()
-    journey_id: Mapped[UUID] = mapped_column(ForeignKey("journeys.id", ondelete="CASCADE"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=True)
-    owner_role: Mapped[JourneyTaskOwner] = mapped_column(enum_col(JourneyTaskOwner), nullable=False)
-    offset_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    required: Mapped[bool] = mapped_column(Boolean, default=True)
-    status: Mapped[JourneyTaskStatus] = mapped_column(enum_col(JourneyTaskStatus), default=JourneyTaskStatus.PENDING)
-    due_on: Mapped[date] = mapped_column(Date)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    assignee_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    journey_id: Mapped[UUID] = mapped_column(
+        ForeignKey("journeys.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_role: Mapped[JourneyTaskOwner] = mapped_column(
+        enum_col(JourneyTaskOwner), nullable=False
+    )
+    assignee_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    due_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[JourneyTaskStatus] = mapped_column(
+        enum_col(JourneyTaskStatus), default=JourneyTaskStatus.PENDING, nullable=False
+    )
+    required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    
+    completed_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     journey: Mapped["Journey"] = relationship(back_populates="tasks", lazy="joined")
-    
+
     def __repr__(self) -> str:
         return f"<JourneyTask {self.id} for {self.journey_id} ({self.name})>"
 
 
-class JourneyTemplate(Base):
-    """Represents a template for creating a journey."""
-    
+class JourneyTemplate(TimestampMixin, Base):
+    """A reusable definition used to create journeys."""
+
     __tablename__ = "journey_templates"
-    
+    __table_args__ = (
+        UniqueConstraint("org_id", "code", name="uq_journey_templates_org_code"),
+        Index("ix_journey_templates_org_type", "org_id", "journey_type"),
+    )
+
     id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=True)
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
     journey_type: Mapped[JourneyType] = mapped_column(enum_col(JourneyType), nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    
-    journeys: Mapped[list["Journey"]] = relationship(back_populates="template", lazy="selectin")
-    
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    journeys: Mapped[list["Journey"]] = relationship(
+        back_populates="template", lazy="selectin"
+    )
+    tasks: Mapped[list["JourneyTemplateTask"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan", passive_deletes=True
+    )
+
     def __repr__(self) -> str:
         return f"<JourneyTemplate {self.id} ({self.code})>"
 
 
-class JourneyTemplateTask(Base):
-    """Represents a task within a journey template."""
-    
+class JourneyTemplateTask(TimestampMixin, Base):
+    """A task definition inside a journey template."""
+
     __tablename__ = "journey_template_tasks"
-    
+    __table_args__ = (
+        Index("ix_journey_template_tasks_template", "template_id", "sort_order"),
+    )
+
     id: Mapped[UUID] = uuid_pk()
-    template_id: Mapped[UUID] = mapped_column(ForeignKey("journey_templates.id", ondelete="CASCADE"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=True)
-    owner_role: Mapped[JourneyTaskOwner] = mapped_column(enum_col(JourneyTaskOwner), nullable=False)
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    template_id: Mapped[UUID] = mapped_column(
+        ForeignKey("journey_templates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_role: Mapped[JourneyTaskOwner] = mapped_column(
+        enum_col(JourneyTaskOwner), nullable=False
+    )
     offset_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    required: Mapped[bool] = mapped_column(Boolean, default=True)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    
+    required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    template: Mapped["JourneyTemplate"] = relationship(back_populates="tasks")
+
     @property
     def journey_type(self) -> JourneyType:
         return self.template.journey_type
-    
+
     def __repr__(self) -> str:
         return f"<JourneyTemplateTask {self.id} for {self.template_id} ({self.name})>"
 
 
-class Separation(Base):
-    """Represents an offboarding case."""
-    
+class Separation(TimestampMixin, Base):
+    """An offboarding case for an employee."""
+
     __tablename__ = "separations"
-    
+    __table_args__ = (
+        UniqueConstraint("org_id", "employee_id", name="uq_separations_org_employee"),
+        Index("ix_separations_org_status", "org_id", "status"),
+    )
+
     id: Mapped[UUID] = uuid_pk()
-    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    employee_id: Mapped[UUID] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
-    journey_id: Mapped[UUID | None] = mapped_column(ForeignKey("journeys.id", ondelete="SET NULL"), nullable=True)
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     exit_type: Mapped[ExitType] = mapped_column(enum_col(ExitType), nullable=False)
-    status: Mapped[SeparationStatus] = mapped_column(enum_col(SeparationStatus), default=SeparationStatus.INITIATED, nullable=False)
-    notice_date: Mapped[date] = mapped_column(Date)
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[SeparationStatus] = mapped_column(
+        enum_col(SeparationStatus), default=SeparationStatus.INITIATED, nullable=False
+    )
+    notice_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     last_working_day: Mapped[date] = mapped_column(Date, nullable=False)
-    reason_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    rehire_eligible: Mapped[bool] = mapped_column(Boolean, default=True)
+    rehire_eligible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    exit_interview_done: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    final_pay_ready: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    journey_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("journeys.id", ondelete="SET NULL"), nullable=True
+    )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    
-    employee: Mapped["Employee"] = relationship(back_populates="separation", lazy="selectin", uselist=False)
-    journey: Mapped["Journey"] = relationship(lazy="selectin")
-    
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    employee: Mapped["Employee"] = relationship(
+        back_populates="separation", lazy="selectin", uselist=False
+    )
+    journey: Mapped["Journey | None"] = relationship(lazy="selectin")
+
     def __repr__(self) -> str:
         return f"<Separation {self.id} for {self.employee_id} ({self.exit_type.value})>"
 
@@ -1576,15 +1594,17 @@ class CalibrationEntry(TimestampMixin, Base):
 class ReviewCheckIn(TimestampMixin, Base):
     """A check-in submission within a review cycle capture window.
 
-    One row per (employee, cycle) pair. Tied to a review cycle, with a
-    status drawn from CheckInStatus, a due date, and optional notes.
+    One row per (employee, cycle) pair, with separate employee and manager
+    notes and a single submitted rating.
     """
 
     __tablename__ = "review_check_ins"
     __table_args__ = (
-        UniqueConstraint("employee_id", "cycle_id", name="uq_review_check_ins_emp_cycle"),
-        Index("ix_review_check_ins_cycle", "cycle_id"),
-        Index("ix_review_check_ins_org", "org_id"),
+        UniqueConstraint(
+            "cycle_id", "employee_id", name="uq_review_check_ins_cycle_employee"
+        ),
+        Index("ix_review_check_ins_org_employee", "org_id", "employee_id"),
+        Index("ix_review_check_ins_org_status", "org_id", "status"),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -1597,12 +1617,70 @@ class ReviewCheckIn(TimestampMixin, Base):
     employee_id: Mapped[UUID] = mapped_column(
         ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    manager_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+    due_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[CheckInStatus] = mapped_column(
         enum_col(CheckInStatus), default=CheckInStatus.PENDING, nullable=False
     )
-    due_on: Mapped[date] = mapped_column(Date, nullable=False)
-    notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    employee_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manager_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class FeedbackRequest(TimestampMixin, Base):
+    """A 360-feedback request for a subject employee from a reviewer."""
+
+    __tablename__ = "feedback_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "cycle_id",
+            "subject_employee_id",
+            "reviewer_employee_id",
+            name="uq_feedback_requests_cycle_subject_reviewer",
+        ),
+        Index("ix_feedback_requests_org_reviewer", "org_id", "reviewer_employee_id"),
+        Index("ix_feedback_requests_org_status", "org_id", "status"),
+        Index("ix_feedback_requests_org_subject", "org_id", "subject_employee_id"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cycle_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("review_cycles.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    subject_employee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    reviewer_employee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewer_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    relationship: Mapped[FeedbackRelationship] = mapped_column(
+        enum_col(FeedbackRelationship), nullable=False
+    )
+    anonymous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[FeedbackStatus] = mapped_column(
+        enum_col(FeedbackStatus), default=FeedbackStatus.PENDING, nullable=False
+    )
+    due_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    requested_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    strengths: Mapped[str | None] = mapped_column(Text, nullable=True)
+    improvements: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 __all__ = [
@@ -1660,6 +1738,7 @@ __all__ = [
     "BenefitType",
     "BankAccountType",
     "ReviewCheckIn",
+    "FeedbackRequest",
     "Skill",
     "ProficiencyLevel",
     "EmployeeSkill",

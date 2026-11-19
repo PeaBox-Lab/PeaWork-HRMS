@@ -170,6 +170,8 @@ def s3_object_exists(bucket: str, key: str) -> bool:
     _init_s3()
     if _s3_client is None:
         return False
+    from botocore.exceptions import ClientError  # type: ignore[import]
+
     try:
         _s3_client.head_object(Bucket=bucket, Key=key)
         return True
@@ -206,6 +208,8 @@ def s3_list_objects(bucket: str, prefix: str = "", delimiter: str = "") -> list:
     _init_s3()
     if _s3_client is None:
         return []
+    from botocore.exceptions import ClientError  # type: ignore[import]
+
     objects = []
     try:
         paginator = _s3_client.get_paginator("list_objects_v2")

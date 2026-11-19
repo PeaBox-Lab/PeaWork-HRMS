@@ -1,139 +1,119 @@
-"""OpenTelemetry instrumentation for PeaWork HRMS.
+"""Optional OpenTelemetry instrumentation for PeaWork HRMS.
 
-This module initializes OpenTelemetry tracing and metrics for the application.
-It should be imported early in the application startup, typically in the
-main FastAPI app creation file.
+OpenTelemetry is an optional dependency. Importing this module must never fail
+when the SDK is absent: the app still starts, and instrumentation is skipped
+(with a warning) if ``PEAWORK_OTEL_ENABLED=true`` but the packages are missing.
+
+Prometheus metrics are owned by :mod:`peawork.metrics` and exposed by the
+``/metrics`` route in ``main.py``; this module only handles tracing.
 """
 
 from __future__ import annotations
 
+import logging
 import time
-from typing import Callable, Optional
 
-from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 
 from .config import get_settings
 
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 
-# ---------------------------------------------------------------------------
-# Tracing setup
-# ---------------------------------------------------------------------------
+_initialized = False
 
-def _init_tracing() -> None:
-    """Initialize OpenTelemetry tracing."""
-    trace.set_tracer_provider(
-        TracerProvider(
-            resources=[Resource.create({"service.name": settings.otel_service_name})]
-        )
-    )
-
-    # Choose exporter
-    if settings.otel_endpoint:
-        # Use OTLP gRPC exporter
-        otlp_exporter = OTLPSpanExporter(
-            endpoint=settings.otel_endpoint,
-            insecure=settings.otel_insecure,
-        )
-    else:
-        # Use console exporter for development
-        otlp_exporter = ConsoleSpanExporter()
-
-    # Add span processor
-    trace.get_tracer_provider().add_span_processor(
-        BatchSpanProcessor(otlp_exporter)
-    )
-
-# ---------------------------------------------------------------------------
-# Metrics setup
-# ---------------------------------------------------------------------------
-
-def _init_metrics() -> Histogram:
-    """Initialize OpenTelemetry metrics."""
-    # Define Prometheus metrics
-    request_duration = Histogram(
-        "http_request_duration_seconds",
-        "HTTP request duration in seconds",
-        ["method", "path", "status_code"],
-        buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
-    )
-    return request_duration
-
-# ---------------------------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------------------------
 
 class OTELHTTPMiddleware(BaseHTTPMiddleware):
-    """Middleware to capture HTTP request timing and create spans."""
-    def __init__(self, app, tracer_provider, request_duration_histogram):
-        self.app = app
-        self.tracer_provider = tracer_provider
-        self.request_duration = request_duration_histogram
+    """Create a span and record timing for each HTTP request."""
 
-    async def dispatch(self, request: Request, call_next):
-        # Start a new span for the request
-        with self.tracer_provider.trace_context_manager() as span:
-            # Create a span for the request
-            tracer = self.tracer_provider.get_tracer("fastapi")
-            with tracer.start_as_current_span("http.request"):
-                start_time = time.time()
-                try:
-                    response: Response = await call_next(request)
-                    process_time = time.time() - start_time
-                    # Record metrics
-                    self.request_duration.labels(
-                        method=request.method,
-                        path=request.url.path,
-                        status_code=response.status_code,
-                    ).observe(process_time)
-                    # Add attributes to span
-                    span.set_attribute("http.method", request.method)
-                    span.set_attribute("http.route", request.url.path)
-                    span.set_attribute("http.status_code", response.status_code)
-                    span.set_attribute("http.client.ip", request.client.host if request.client else "unknown")
-                    return response
-                except Exception as exc:
-                    span.record_exception(exc)
-                    raise
+    def __init__(self, app, tracer):
+        super().__init__(app)
+        self.tracer = tracer
 
-# ---------------------------------------------------------------------------
-# FastAPI integration
-# ---------------------------------------------------------------------------
+    async def dispatch(self, request, call_next):
+        start_time = time.perf_counter()
+        with self.tracer.start_as_current_span("http.request") as span:
+            span.set_attribute("http.method", request.method)
+            span.set_attribute("http.route", request.url.path)
+            try:
+                response = await call_next(request)
+            except Exception as exc:  # noqa: BLE001 - re-raised after recording
+                span.record_exception(exc)
+                raise
+            elapsed = time.perf_counter() - start_time
+            span.set_attribute("http.status_code", response.status_code)
+            span.set_attribute("http.duration_ms", round(elapsed * 1000, 2))
+            span.set_attribute(
+                "http.client.ip",
+                request.client.host if request.client else "unknown",
+            )
+            return response
 
-def init_otel(app):
-    """Initialize OpenTelemetry on the given FastAPI app."""
-    if not settings.otel_enabled:
+
+def init_otel(app) -> None:
+    """Initialize OpenTelemetry tracing on ``app``.
+
+    No-op unless ``PEAWORK_OTEL_ENABLED=true``. Safe to call more than once;
+    the global tracer provider is only configured on the first call.
+    """
+    global _initialized
+
+    if not settings.otel_enabled or _initialized:
         return
 
-    # Initialize tracing
-    _init_tracing()
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import (
+            BatchSpanProcessor,
+            ConsoleSpanExporter,
+        )
+    except ImportError as exc:  # pragma: no cover - depends on optional extras
+        logger.warning(
+            "PEAWORK_OTEL_ENABLED is true but the OpenTelemetry SDK is not "
+            "installed (%s). Install requirements/v2-otel.txt to enable tracing.",
+            exc,
+        )
+        return
 
-    # Initialize metrics
-    request_duration = _init_metrics()
+    exporter = ConsoleSpanExporter()
+    if settings.otel_endpoint:
+        try:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter,
+            )
 
-    # Add middleware
-    app.add_middleware(OTELHTTPMiddleware, tracer_provider=trace.get_tracer_provider(), request_duration_histogram=request_duration)
+            exporter = OTLPSpanExporter(
+                endpoint=settings.otel_endpoint,
+                insecure=settings.otel_insecure,
+            )
+        except ImportError as exc:  # pragma: no cover - optional extra
+            logger.warning(
+                "OTLP exporter not installed (%s); falling back to console spans.",
+                exc,
+            )
 
-    # Add FastAPI auto-instrumentation (requires opentelemetry-instrumentation-fastapi)
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": settings.otel_service_name})
+    )
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    app.add_middleware(
+        OTELHTTPMiddleware, tracer=provider.get_tracer("peawork.http")
+    )
+
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        FastAPIInstrumentor.instrument_app(app)
-    except Exception as e:
-        print(f"Warning: FastAPI instrumentation failed: {e}")
 
-    # Add Prometheus metrics endpoint
-    @app.get("/metrics")
-    async def metrics_endpoint():
-        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        FastAPIInstrumentor.instrument_app(app)
+    except ImportError:  # pragma: no cover - optional extra
+        logger.info(
+            "opentelemetry-instrumentation-fastapi is not installed; "
+            "using the built-in request span middleware."
+        )
+
+    _initialized = True
+    logger.info("OpenTelemetry tracing enabled (service=%s)", settings.otel_service_name)

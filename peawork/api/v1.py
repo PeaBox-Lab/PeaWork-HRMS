@@ -16,10 +16,17 @@ from ..models import (
     BiometricDevice,
     CalibrationEntry,
     CalibrationRound,
+    Department,
     DevelopmentGoal,
     Employee,
     EmployeeSkill,
+    LeaveType,
+    PayrollRun,
+    Position,
+    Shift,
     Skill,
+    User,
+    WorkSchedule,
 )
 from ..schemas import (
     AuditEventOut,

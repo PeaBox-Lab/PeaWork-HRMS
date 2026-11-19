@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from peawork import __version__
+
 
 def test_health_endpoints(client):
     response = client.get("/health")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["version"] == "2.0.0"
+    assert body["version"] == __version__
     assert body["deployment"] == "test"
     assert body["database"] == "sqlite"
 
