@@ -484,8 +484,40 @@ def list_payroll_runs(db: Session, org_id: UUID) -> list[PayrollRun]:
     )
 
 
+def _prorate_factor(
+    employee: Employee | None,
+    period_start: date | None,
+    period_end: date | None,
+) -> Decimal:
+    """Fraction of a payroll period the employee covered.
+
+    Joiners mid-period earn/pay only the covered days; the factor is ``1``
+    when the period is fully covered, no employee/period is known, or the
+    employee started before the period began.
+    """
+    if (
+        employee is None
+        or not employee.date_of_joining
+        or not period_start
+        or not period_end
+    ):
+        return Decimal("1")
+    if employee.date_of_joining <= period_start:
+        return Decimal("1")
+    span = (period_end - period_start).days
+    if span <= 0:
+        return Decimal("1")
+    elapsed = (period_end - employee.date_of_joining).days
+    factor = Decimal(elapsed) / Decimal(span) if elapsed > 0 else Decimal("0")
+    return max(Decimal("0"), min(Decimal("1"), factor))
+
+
 def _compute_employee_payslip(
-    db: Session, org_id: UUID, employee_id: UUID, as_of: date | None = None
+    db: Session,
+    org_id: UUID,
+    employee_id: UUID,
+    as_of: date | None = None,
+    period_start: date | None = None,
 ) -> tuple[Decimal, Decimal, list[dict]]:
     """Compute gross, deductions and line dicts for one employee (no persistence)."""
     comp = get_compensation(db, org_id=org_id, employee_id=employee_id)
@@ -516,6 +548,9 @@ def _compute_employee_payslip(
 
     # Statutory lines from the country engine selected for this employee.
     employee = db.get(Employee, employee_id)
+    factor = _prorate_factor(employee, period_start, as_of)
+    if factor != Decimal("1"):
+        gross = (gross * factor).quantize(Decimal("0.01"))
     country = resolve_employee_country(db, org_id, employee)
     items, _result = country_statutory_items(
         db,
@@ -545,20 +580,25 @@ def _compute_employee_payslip(
 
     # Employee benefit premiums (health insurance, life cover, etc.).
     for item in benefit_deduction_items_for(db, org_id, employee_id, as_of):
-        if item["employee_amount"] > 0:
+        employee_amount = item["employee_amount"]
+        employer_amount = item["employer_amount"]
+        if factor != Decimal("1"):
+            employee_amount = (employee_amount * factor).quantize(Decimal("0.01"))
+            employer_amount = (employer_amount * factor).quantize(Decimal("0.01"))
+        if employee_amount > 0:
             lines.append({
                 "component_id": None,
                 "component_name": item["name"],
                 "component_type": item["line_type"],
-                "amount": item["employee_amount"],
+                "amount": employee_amount,
             })
-            total_deductions += item["employee_amount"]
-        if item["employer_amount"] > 0:
+            total_deductions += employee_amount
+        if employer_amount > 0:
             lines.append({
                 "component_id": None,
                 "component_name": f"{item['name']} (employer)",
                 "component_type": PayComponentType.EMPLOYER_CONTRIBUTION,
-                "amount": item["employer_amount"],
+                "amount": employer_amount,
             })
 
     return gross, total_deductions, lines
@@ -584,7 +624,7 @@ def generate_payslips(
     payslips: list[Payslip] = []
     for employee_id in employee_ids:
         gross, total_deductions, line_dicts = _compute_employee_payslip(
-            db, org_id, employee_id, as_of=run.period_end
+            db, org_id, employee_id, as_of=run.period_end, period_start=run.period_start
         )
         if not line_dicts:
             # Skip employees without any payable lines
@@ -653,7 +693,7 @@ def preview_payroll_run(
     total_deductions = Decimal("0")
     for employee_id in employee_ids:
         gross, deductions, line_dicts = _compute_employee_payslip(
-            db, org_id, employee_id, as_of=run.period_end
+            db, org_id, employee_id, as_of=run.period_end, period_start=run.period_start
         )
         if not line_dicts:
             continue

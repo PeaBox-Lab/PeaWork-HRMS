@@ -213,8 +213,8 @@ Reference rates in the pack are **planning defaults only**; configured
 
 - Filing submissions: UK RTI/FPS and German DEUV submission payloads are generated (`POST /api/v1/payroll-filings/submit`); live HMRC/Finanzamt submission is pending — no automated submission or account linkage exists
 - German tax classes A1–A6, church tax, and the full amtliches Tarif formula (the tariff is a documented approximation of the quadratic zone)
+- Mid-period joiners/leavers are prorated on payslips (`_prorate_factor`); retro adjustments are still missing
 - Remaining European jurisdictions (FR, IT, ES, NL, CH, PL, SE, BE, IE, AT) need their own engines
-- Proration for mid-period joiners/leavers and retro adjustments
 
 Representative country requirements (engineering scope):
 
@@ -332,7 +332,7 @@ which is a stronger differentiator than adding more shallow modules.
 | REST API routes (`/api/v1`) | 140 |
 | Web routes | 99 |
 | Service modules | 21 |
-| Tests | 414 passing across 19 files |
+| Tests | 415 passing across 19 files |
 | Supported UI locales | en, hi |
 | Country packs | 14 profiles (12 Europe + India + US) |
 | Payroll engines | UK PAYE/NI, German Lohnsteuer/social + tax classes + church tax, generic fallback |

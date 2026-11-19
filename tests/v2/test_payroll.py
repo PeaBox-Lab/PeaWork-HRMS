@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 
@@ -438,6 +440,20 @@ def test_benefit_premium_is_deducted_in_payroll(client):
     assert benefit_lines
     assert float(benefit_lines[0]["amount"]) == 1200.0
     assert float(detail["total_deductions"]) >= 1200.0
+
+
+def test_prorate_factor_for_mid_period_joiner():
+    from types import SimpleNamespace
+
+    from peawork.services.payroll import _prorate_factor
+
+    joiner = SimpleNamespace(date_of_joining=date(2026, 10, 16))
+    assert _prorate_factor(joiner, date(2026, 10, 1), date(2026, 10, 31)) == Decimal("0.5")
+    # Joined before the period -> fully covered.
+    early = SimpleNamespace(date_of_joining=date(2026, 10, 9))
+    assert _prorate_factor(early, date(2026, 10, 10), date(2026, 10, 31)) == Decimal("1")
+    # No employee or period -> 1.
+    assert _prorate_factor(None, date(2026, 10, 1), date(2026, 10, 31)) == Decimal("1")
 
 
 def test_statutory_rule_version_create_list_update_delete(client):
