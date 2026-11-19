@@ -211,8 +211,8 @@ and `GET /api/v1/metadata/countries/{code}`.
 Reference rates in the pack are **planning defaults only**; configured
 `StatutoryRuleVersion` rows must win in production. Remaining architecture:
 
-- Filing submissions: UK RTI/FPS and German DEUV submission payloads are generated (`POST /api/v1/payroll-filings/submit`); live HMRC/Finanzamt submission is pending - no automated submission or account linkage exists
-- German tax classes II–VI, church tax, and the full amtliches Tarif formula (the current engine is a documented approximation)
+- Filing submissions: UK RTI/FPS and German DEUV submission payloads are generated (`POST /api/v1/payroll-filings/submit`); live HMRC/Finanzamt submission is pending — no automated submission or account linkage exists
+- German tax classes A1–A6, church tax, and the full amtliches Tarif formula (the tariff is a documented approximation of the quadratic zone)
 - Remaining European jurisdictions (FR, IT, ES, NL, CH, PL, SE, BE, IE, AT) need their own engines
 - Proration for mid-period joiners/leavers and retro adjustments
 
@@ -332,10 +332,10 @@ which is a stronger differentiator than adding more shallow modules.
 | REST API routes (`/api/v1`) | 140 |
 | Web routes | 99 |
 | Service modules | 21 |
-| Tests | 411 passing across 19 files |
+| Tests | 413 passing across 19 files |
 | Supported UI locales | en, hi |
 | Country packs | 14 profiles (12 Europe + India + US) |
-| Payroll engines | UK PAYE/NI, German Lohnsteuer/social, generic fallback |
+| Payroll engines | UK PAYE/NI, German Lohnsteuer/social + tax classes + church tax, generic fallback |
 | Payroll statutory rule types | PF, ESI, PT, TDS |
 | Tax regimes declared | India old/new, US federal, UK PAYE, generic |
 | Tax regimes implemented | India flat rules, UK PAYE/NI, German Lohnsteuer approximation |

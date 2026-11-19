@@ -17,6 +17,7 @@ from peawork.payroll_engines import (
     filings_for,
     get_payroll_engine,
     list_payroll_engines,
+    money,
     progressive_tax,
     submission_for_filing,
     tapered_allowance,
@@ -241,6 +242,69 @@ def test_payroll_filing_submit_endpoint(client):
     )
     assert germany.status_code == 200, germany.text
     assert germany.json()["doc_type"] == "DEUV"
+
+
+def test_germany_tax_classes():
+    base_result = compute_country_payroll(
+        country_code="DE",
+        gross=Decimal("5000"),
+        currency="EUR",
+        pay_frequency="monthly",
+        as_of=date(2026, 11, 30),
+        rules=_rules("DE"),
+    )
+    class1 = _line(base_result, "lohnsteuer").employee_amount
+
+    for tax_class in ("2", "3"):
+        rules = _rules("DE")
+        for rule in rules:
+            if rule.rule_type == "income_tax":
+                rule.rates["tax_class"] = tax_class
+        result = compute_country_payroll(
+            country_code="DE",
+            gross=Decimal("5000"),
+            currency="EUR",
+            pay_frequency="monthly",
+            as_of=date(2026, 11, 30),
+            rules=rules,
+        )
+        assert _line(result, "lohnsteuer").employee_amount == class1
+
+    # Class 6 keeps the personal allowance allowed for A2/A3 and drops the
+    # basic allowance, so Lohnsteuer rises.
+    rules = _rules("DE")
+    for rule in rules:
+        if rule.rule_type == "income_tax":
+            rule.rates["tax_class"] = "6"
+    result = compute_country_payroll(
+        country_code="DE",
+        gross=Decimal("5000"),
+        currency="EUR",
+        pay_frequency="monthly",
+        as_of=date(2026, 11, 30),
+        rules=rules,
+    )
+    assert _line(result, "lohnsteuer").employee_amount > class1
+
+
+def test_germany_church_tax():
+    rules = _rules("DE")
+    for rule in rules:
+        if rule.rule_type == "income_tax":
+            rule.rates["church_tax_rate"] = "8"
+            rule.rates["church_tax_label"] = "Kirchensteuer"
+    result = compute_country_payroll(
+        country_code="DE",
+        gross=Decimal("5000"),
+        currency="EUR",
+        pay_frequency="monthly",
+        as_of=date(2026, 11, 30),
+        rules=rules,
+    )
+    church_tax = _line(result, "church_tax")
+    lohnsteuer = _line(result, "lohnsteuer").employee_amount
+    assert church_tax.employee_amount == money(lohnsteuer * Decimal("0.08"))
+    assert church_tax.category == "tax"
 
 
 def test_missing_country_rules_produce_warnings():

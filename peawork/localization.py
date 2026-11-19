@@ -71,6 +71,7 @@ REFERENCE_RULE_TEMPLATES: dict[str, list[dict]] = {
             "version": 1,
             "rates": {
                 "label": "Lohnsteuer (tax class I)",
+                "tax_class": "1",
                 "basic_allowance": "12096",
                 "band_basis": "gross",
                 "solidarity_rate": "5.5",

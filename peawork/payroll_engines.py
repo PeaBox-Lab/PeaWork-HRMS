@@ -751,7 +751,7 @@ class GermanyEngine:
             warnings.append("No German income_tax rule configured; Lohnsteuer not calculated.")
         else:
             rates = tax_rule.rates or {}
-            allowance = _dec(rates.get("basic_allowance"))
+            allowance = self._tax_class_allowance(rates)
             taxable = max(ZERO, annual - allowance)
             bands = list(rates.get("bands") or [])
             if rates.get("band_basis", "gross") == "gross":
@@ -770,6 +770,20 @@ class GermanyEngine:
                         base=context.gross,
                     )
                 )
+                church_rate = _dec(rates.get("church_tax_rate"))
+                if church_rate > 0 and annual_tax > 0:
+                    church_amount = money(annual_tax * church_rate / Decimal("100") / context.periods)
+                    if church_amount > 0:
+                        lines.append(
+                            PayrollLine(
+                                code="church_tax",
+                                name=str(rates.get("church_tax_label") or "Kirchensteuer"),
+                                category="tax",
+                                employee_amount=church_amount,
+                                employer_amount=ZERO,
+                                base=context.gross,
+                            )
+                        )
 
         social_rule = context.rule(StatutoryRuleType.SOCIAL_SECURITY)
         if social_rule is None:
@@ -809,6 +823,19 @@ class GermanyEngine:
             lines=tuple(lines),
             warnings=tuple(warnings),
         )
+
+    @staticmethod
+    def _tax_class_allowance(rates: Mapping[str, Any]) -> Decimal:
+        """Annual taxable-free amount for the configured German tax class.
+
+        Classes A2 and A3 retain the 1x Grundfreibetrag personal allowance;
+        A4/A5/A6 are family/single-parent classes where the allowance is set
+        explicitly via ``class_allowance`` (defaults to 0).
+        """
+        tax_class = str(rates.get("tax_class") or "1").upper().lstrip("A")
+        if tax_class in ("1", "2", "3"):
+            return _dec(rates.get("personal_allowance") or rates.get("basic_allowance"))
+        return _dec(rates.get("class_allowance"))
 
     @staticmethod
     def _solidarity_surcharge(annual_tax: Decimal, rates: Mapping[str, Any]) -> Decimal:
@@ -861,7 +888,8 @@ class GermanyEngine:
             "implemented": True,
             "supported_rule_types": sorted(self.consumed_rule_types),
             "filings": ["DEUV"],
-            "notes": "DEUV submission payload via GZS1-style API; live submission pending provider setup; tax classes II-VI, church tax and ELStAM not modelled.",
+            "tax_classes": ["A1", "A2", "A3", "A4", "A5", "A6"],
+            "notes": "DEUV submission payload via GZS1-style API; tax classes A1-A3 share the personal allowance, A4/A5/A6 use class_allowance; church tax modelled. Tax class W and ELStAM are not modelled.",
         }
 
 
