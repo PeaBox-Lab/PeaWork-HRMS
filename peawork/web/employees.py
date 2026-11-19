@@ -178,7 +178,7 @@ def employees_list(
         "department": department,
         "status": status,
         "departments": _departments(db, user),
-        "can_create": user.role in {Role.ADMIN, Role.HR},
+        "can_create": user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR},
         "statuses": list(EmployeeStatus),
     }
     if request.headers.get("hx-request") == "true":
@@ -430,7 +430,7 @@ def documents_list(
         request,
         "documents.html",
         documents=documents,
-        can_delete=user.role in {Role.ADMIN, Role.HR},
+        can_delete=user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR},
         categories=list(DocumentCategory),
     )
 

@@ -35,7 +35,7 @@ def _month_range(month: str) -> tuple[date, date]:
 
 def _scoped_employees(db: Session, org_id: UUID, user: User) -> list[Employee]:
     stmt = select(Employee).where(Employee.org_id == org_id)
-    if user.role in {Role.ADMIN, Role.HR, Role.AUDITOR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}:
         return list(db.scalars(stmt))
     if user.role == Role.MANAGER and user.employee_id:
         return list(

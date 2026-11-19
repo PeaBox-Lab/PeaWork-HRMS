@@ -98,7 +98,7 @@ def create_employee(
     data: EmployeeCreate,
     request=None,
 ) -> Employee:
-    if actor.role.value not in {"admin", "hr"}:
+    if actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ForbiddenError("Only HR or administrators may create employees")
 
     employee_no = (data.employee_no or "").strip() or next_employee_no(db, org_id)
@@ -130,6 +130,7 @@ def create_employee(
         manager_id=data.manager_id,
         location=data.location,
         country_code=data.country_code,
+        legal_entity_id=data.legal_entity_id,
         pan_masked=data.pan_masked,
         bank_masked=data.bank_masked,
     )

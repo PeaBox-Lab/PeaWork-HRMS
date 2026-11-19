@@ -20,6 +20,114 @@ from decimal import Decimal
 REFERENCE_YEAR = "2026-reference"
 
 
+# Reference statutory rule templates for the implemented country engines.
+# Structure and defaults only: a payroll professional must confirm every number
+# for the tax year before production use.
+REFERENCE_RULE_TEMPLATES: dict[str, list[dict]] = {
+    "GB": [
+        {
+            "rule_type": "income_tax",
+            "country_code": "GB",
+            "effective_from": "2026-04-06",
+            "version": 1,
+            "rates": {
+                "label": "PAYE Income Tax",
+                "personal_allowance": "12570",
+                "allowance_taper_threshold": "100000",
+                "allowance_taper_rate": "50",
+                "bands": [
+                    {"up_to": "37700", "rate": "20"},
+                    {"up_to": "112570", "rate": "40"},
+                    {"up_to": None, "rate": "45"},
+                ],
+            },
+            "notes": "Reference 2025/26-style bands and allowance; review before production.",
+        },
+        {
+            "rule_type": "social_security",
+            "country_code": "GB",
+            "effective_from": "2026-04-06",
+            "version": 1,
+            "rates": {
+                "label": "National Insurance (Class 1)",
+                "employee": [
+                    {"up_to": "12570", "rate": "0"},
+                    {"up_to": "50270", "rate": "8"},
+                    {"up_to": None, "rate": "2"},
+                ],
+                "employer": [
+                    {"up_to": "5000", "rate": "0"},
+                    {"up_to": None, "rate": "15"},
+                ],
+            },
+            "notes": "Reference annual thresholds; employment allowance not modelled.",
+        },
+    ],
+    "DE": [
+        {
+            "rule_type": "income_tax",
+            "country_code": "DE",
+            "effective_from": "2026-01-01",
+            "version": 1,
+            "rates": {
+                "label": "Lohnsteuer (tax class I)",
+                "basic_allowance": "12096",
+                "band_basis": "gross",
+                "solidarity_rate": "5.5",
+                "solidarity_free_limit": "18130",
+                "bands": [
+                    {"up_to": "17443", "start_rate": "14", "rate": "24"},
+                    {"up_to": "68480", "start_rate": "24", "rate": "42"},
+                    {"up_to": "277825", "rate": "42"},
+                    {"up_to": None, "rate": "45"},
+                ],
+            },
+            "notes": "Reference tariff approximation for tax class I; church tax and tax classes II-VI are not modelled.",
+        },
+        {
+            "rule_type": "social_security",
+            "country_code": "DE",
+            "effective_from": "2026-01-01",
+            "version": 1,
+            "rates": {
+                "label": "Social insurance",
+                "components": [
+                    {
+                        "code": "kv",
+                        "name": "Health (KV)",
+                        "employee_rate": "8.55",
+                        "employer_rate": "7.30",
+                        "ceiling": "66150",
+                    },
+                    {
+                        "code": "pv",
+                        "name": "Long-term care (PV)",
+                        "employee_rate": "2.40",
+                        "employer_rate": "1.80",
+                        "ceiling": "66150",
+                    },
+                    {
+                        "code": "rv",
+                        "name": "Pension (RV)",
+                        "employee_rate": "9.30",
+                        "employer_rate": "9.30",
+                        "ceiling": "96600",
+                    },
+                    {
+                        "code": "av",
+                        "name": "Unemployment (AV)",
+                        "employee_rate": "1.30",
+                        "employer_rate": "1.30",
+                        "ceiling": "96600",
+                    },
+                ],
+            },
+            "notes": "Reference contribution ceilings and average Zusatzbeitrag; review yearly.",
+        },
+    ],
+}
+
+
 @dataclass(frozen=True)
 class StatutoryScheme:
     """A statutory contribution scheme exposed by a country profile."""
@@ -496,16 +604,29 @@ def reference_statutory_items(profile: CountryProfile, gross: Decimal) -> list[d
     return items
 
 
+def reference_rule_templates(code: str | None) -> list[dict]:
+    """Reference ``StatutoryRuleVersion`` payloads for supported engines.
+
+    These are copy-and-review templates for creating versioned rules through
+    ``POST /api/v1/statutory-rule-versions``; they are not production rates.
+    """
+    import copy
+
+    return copy.deepcopy(REFERENCE_RULE_TEMPLATES.get(normalize_country(code), []))
+
+
 __all__ = [
     "COUNTRY_PROFILES",
     "COUNTRY_ORDER",
     "CountryProfile",
+    "REFERENCE_RULE_TEMPLATES",
     "StatutoryScheme",
     "country_payload",
     "european_countries",
     "get_country_profile",
     "list_country_profiles",
     "normalize_country",
+    "reference_rule_templates",
     "reference_statutory_items",
     "require_country_profile",
 ]

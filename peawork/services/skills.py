@@ -47,7 +47,7 @@ def _employee(db: Session, org_id, employee_id) -> Employee:
 
 
 def _require_manage(db: Session, actor: User, employee: Employee) -> None:
-    if actor.role in {Role.ADMIN, Role.HR}:
+    if actor.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         return
     if actor.employee_id == employee.id:
         return

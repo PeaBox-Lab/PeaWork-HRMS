@@ -64,7 +64,7 @@ def leave_page(
     )
     approvals = pending_approvals(db, user)
     employees = []
-    if user.role in {Role.ADMIN, Role.HR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         employees = list(
             db.scalars(
                 select(Employee)
@@ -85,7 +85,7 @@ def leave_page(
         holidays=holidays,
         approvals=approvals,
         employees=employees,
-        can_approve=user.role in {Role.ADMIN, Role.HR, Role.MANAGER},
+        can_approve=user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.MANAGER},
         today=date.today(),
     )
 

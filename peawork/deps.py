@@ -30,6 +30,8 @@ def require_user(
     *roles: Role | str, allow_password_change: bool = False
 ) -> Callable[[Request], User]:
     allowed = {Role(r) if not isinstance(r, Role) else r for r in roles}
+    if Role.ADMIN in allowed:
+        allowed.add(Role.SUPER_ADMIN)
 
     def dependency(request: Request) -> User:
         user = current_user(request)

@@ -65,7 +65,7 @@ def organization(
     return render(
         request,
         "organization.html",
-        can_manage=user.role in {Role.ADMIN, Role.HR},
+        can_manage=user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR},
         **_org_context(db, user),
     )
 

@@ -90,7 +90,7 @@
             <span>Audit log</span>
           </a>
         {% endif %}
-        {% if user.role.value == 'admin' %}
+        {% if user.role.value in ('admin', 'super_admin') %}
           <a class="nav__link {% if request.url.path.startswith('/admin/users') %}is-active{% endif %}" href="/admin/users">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 8h5M19.5 5.5v5"/></svg>
             <span>Users</span>

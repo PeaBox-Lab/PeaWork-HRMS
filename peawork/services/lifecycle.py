@@ -101,9 +101,9 @@ _DEFAULT_DETAILS: dict[ChangeRequestType, dict[str, Any]] = {
     ChangeRequestType.REHIRE: {"status": EmployeeStatus.ACTIVE},
 }
 
-_HR_ROLES = {Role.ADMIN, Role.HR}
+_HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
 # Roles that may read every change request in the organisation.
-_READ_ALL_ROLES = {Role.ADMIN, Role.HR, Role.AUDITOR, Role.PAYROLL}
+_READ_ALL_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR, Role.PAYROLL}
 
 # Fields a non-HR actor may apply to their own employee record. Everything else
 # in ``_WRITABLE_FIELDS`` (status, org assignment, employment terms, work email)

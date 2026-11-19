@@ -428,7 +428,7 @@ def list_attendance(
     if employee_id is not None:
         stmt = stmt.where(AttendanceRecord.employee_id == employee_id)
 
-    if user.role in {Role.ADMIN, Role.HR, Role.AUDITOR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}:
         pass
     elif user.role == Role.MANAGER and user.employee_id:
         reports = select(Employee.id).where(

@@ -5,6 +5,7 @@ from enum import StrEnum
 
 class Role(StrEnum):
     ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
     HR = "hr"
     MANAGER = "manager"
     EMPLOYEE = "employee"
@@ -15,12 +16,18 @@ class Role(StrEnum):
     def label(self) -> str:
         return {
             "admin": "Administrator",
+            "super_admin": "Super Administrator",
             "hr": "HR",
             "manager": "Manager",
             "employee": "Employee",
             "auditor": "Auditor",
             "payroll": "Payroll",
         }[self.value]
+
+    @property
+    def is_admin_role(self) -> bool:
+        """Super administrators are administrators of the platform."""
+        return self in {Role.ADMIN, Role.SUPER_ADMIN}
 
 
 class Skill(StrEnum):
@@ -243,6 +250,9 @@ class StatutoryRuleType(StrEnum):
     ESI = "esi"
     PT = "pt"
     TDS = "tds"
+    INCOME_TAX = "income_tax"
+    SOCIAL_SECURITY = "social_security"
+    PENSION = "pension"
 
 
 class CheckInStatus(StrEnum):

@@ -190,7 +190,7 @@ def enforce_mfa(user) -> bool:
     """
     # Admins and HR are always exempt from MFA
     from .domain import Role
-    if user.role in {Role.ADMIN, Role.HR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         return False
 
     # If user has mfa_enabled=true, MFA is required

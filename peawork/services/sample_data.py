@@ -588,7 +588,7 @@ def clean_sample(
         ).all()
     )
     for user in sample_users:
-        if user.role.value == "admin":
+        if user.role.value in { "admin", "super_admin" }:
             continue
         db.delete(user)
         result.users += 1

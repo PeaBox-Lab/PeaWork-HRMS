@@ -316,7 +316,7 @@ def decide_leave(
 
 def cancel_leave(db: Session, *, actor: User, leave_id: UUID, request=None) -> LeaveRequest:
     leave = get_leave(db, actor, leave_id)
-    if leave.employee_id != actor.employee_id and actor.role.value not in {"admin", "hr"}:
+    if leave.employee_id != actor.employee_id and actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ForbiddenError("You may only cancel your own leave")
     if leave.status in {LeaveStatus.CANCELLED, LeaveStatus.REJECTED}:
         raise ConflictError("This leave request can no longer be cancelled")
@@ -391,7 +391,7 @@ def list_leave_requests(
 
 
 def pending_approvals(db: Session, actor: User, limit: int = 50) -> list[LeaveRequest]:
-    if actor.role.value not in {"admin", "hr", "manager"}:
+    if actor.role.value not in {"admin", "super_admin", "hr", "manager"}:
         return []
     stmt = select(LeaveRequest).where(
         LeaveRequest.org_id == actor.org_id, LeaveRequest.status == LeaveStatus.PENDING

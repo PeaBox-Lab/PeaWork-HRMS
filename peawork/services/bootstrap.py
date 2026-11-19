@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import Settings
-from ..domain import AuditAction, EmployeeStatus, EmploymentType
+from ..domain import AuditAction, EmployeeStatus, EmploymentType, Role
 from ..models import Department, Employee, Holiday, LeaveType, Organization, Position, User
 from ..security import generate_password, hash_password, password_problems
 from . import audit
@@ -69,7 +69,9 @@ def ensure_admin(db: Session, settings: Settings, org: Organization) -> tuple[Us
         email=email,
         full_name=settings.bootstrap_admin_name,
         password_hash=hash_password(password),
-        role="admin",  # type: ignore[arg-type]
+        # The bootstrap account is the platform super admin; a super admin is
+        # also an administrator of its organisation.
+        role=Role.SUPER_ADMIN,
         must_change_password=generated is not None,
     )
     db.add(admin)
@@ -80,7 +82,7 @@ def ensure_admin(db: Session, settings: Settings, org: Organization) -> tuple[Us
         action=AuditAction.CREATE,
         entity_type="user",
         entity_id=admin.id,
-        details={"email": email, "role": "admin", "bootstrap": True},
+        details={"email": email, "role": Role.SUPER_ADMIN.value, "bootstrap": True},
         org_id=org.id,
     )
     return admin, generated, True

@@ -89,14 +89,17 @@ def enqueue(
 def list_jobs(
     db: Session,
     *,
-    org_id: UUID,
+    org_id: UUID | None,
     user: User,
     status: JobStatus | None = None,
     limit: int = 100,
 ) -> list[Job]:
-    if user.role not in {Role.ADMIN, Role.HR}:
+    if user.role not in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         raise ForbiddenError("Only admin/hr may inspect jobs")
-    stmt = select(Job).where(Job.org_id == org_id).order_by(Job.created_at.desc()).limit(limit)
+    stmt = select(Job)
+    if org_id is not None:
+        stmt = stmt.where(Job.org_id == org_id)
+    stmt = stmt.order_by(Job.created_at.desc()).limit(limit)
     if status is not None:
         stmt = stmt.where(Job.status == status)
     return list(db.scalars(stmt))
@@ -105,7 +108,7 @@ def list_jobs(
 def retry_dead_letter(
     db: Session, *, org_id: UUID, actor: User, job_id: UUID
 ) -> Job:
-    if actor.role not in {Role.ADMIN, Role.HR}:
+    if actor.role not in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         raise ForbiddenError("Only admin/hr may retry jobs")
     job = db.get(Job, job_id)
     if not job or job.org_id != org_id:

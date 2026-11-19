@@ -128,6 +128,7 @@ class EmployeeBase(BaseModel):
     department_id: UUID | None = None
     position_id: UUID | None = None
     manager_id: UUID | None = None
+    legal_entity_id: UUID | None = None
     location: str | None = Field(default="Gurugram", max_length=120)
     country_code: str | None = Field(default=None, max_length=2)
     pan_masked: str | None = Field(default=None, max_length=32)
@@ -162,6 +163,7 @@ class EmployeeUpdate(BaseModel):
     department_id: UUID | None = None
     position_id: UUID | None = None
     manager_id: UUID | None = None
+    legal_entity_id: UUID | None = None
     location: str | None = Field(default=None, max_length=120)
     country_code: str | None = Field(default=None, max_length=2)
     pan_masked: str | None = Field(default=None, max_length=32)
@@ -196,6 +198,7 @@ class EmployeeOut(ORMModel):
     status: EmployeeStatus
     location: str | None
     country_code: str | None = None
+    legal_entity_id: UUID | None = None
     department: DepartmentOut | None = None
     position: PositionOut | None = None
     manager: EmployeeBrief | None = None

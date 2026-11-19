@@ -202,15 +202,37 @@ plus a country-aware healthcare/insurance benefits layer that feeds payroll.
 - [x] Benefit plans: country/global scope, carrier, policy number, coverage tier, currency, contributions, payroll flag, waiting period, eligibility JSON, metadata.
 - [x] Enrollments: effective dates, premiums, currency, coverage tier, dependants (spouse/partner/child/parent/other).
 - [x] Eligibility: country scope, employment type, minimum service, waiting period.
-- [x] Payroll: active employee premiums become deduction lines; employer premiums become employer-contribution lines; effective/end dates honoured.
 - [x] API: country/benefit metadata, plan CRUD, enrollment list/create, dependant create.
 - [x] Web: `/admin/benefits` catalogue and enrollment form.
-- [ ] `PayrollCountryEngine` implementations (UK and Germany first) with progressive slabs and filing outputs.
+- [x] Payroll: active employee premiums become deduction lines; employer premiums become employer-contribution lines; effective/end dates honoured.
+- [x] `PayrollCountryEngine` protocol (`peawork/payroll_engines.py`) selected by employee/organisation country.
+- [x] UK engine: PAYE bands, personal-allowance taper and Class 1 National Insurance, annualised per pay frequency.
+- [x] German engine: reference Lohnsteuer tariff with progression zones, solidarity surcharge free limit, and KV/PV/RV/AV branches with contribution ceilings.
+- [x] Reference rule templates for GB/DE exposed at `/api/v1/metadata/countries/{code}`; engines listed at `/api/v1/metadata/payroll-engines`.
+- [x] Statutory rule versions are unique per (rule type, country, state) so multi-country rules coexist.
+- [x] Filing descriptions (UK RTI/FPS, P60, P45; German DEUV) — real HMRC/Finanzamt submissions still pending.
+- [ ] Real HMRC/Finanzamt submission flow and German tax classes II–VI, church tax.
 - [ ] Carrier integrations, enrollment windows, life events, and country-specific taxable-benefit reporting.
 
 **Exit:** HR can publish global and country-specific benefit plans, enroll families,
 and see premiums on payslips; the country pack is the stable input for per-country
 payroll engines.
+
+---
+
+### Super admin & platform access (v3.2)
+
+**Status:** ✅ Done
+
+- New `Role.SUPER_ADMIN`: a platform super admin is also an administrator of its
+  organisation; the bootstrap account is the platform super admin.
+- Gates: only super admins can create an administrator, and only super admins
+  can change a user to the `admin` role (web + API); other role changes by
+  ordinary admins are still allowed for non-admin roles.
+- Super admin master access: departments, positions, leave types and job
+  listings span all organisations; the company config page
+  (`/admin/settings`) shows all organisations with an org selector.
+- Regular admins see only their own organisation's masters.
 
 ---
 

@@ -27,7 +27,7 @@ from .forms import FormError, text
 
 router = APIRouter(dependencies=[Depends(csrf_guard)])
 
-HR_ROLES = {Role.ADMIN, Role.HR}
+HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
 
 EXIT_TYPE_LABELS = {item.value: item.label for item in ExitType}
 NEXT_STATUS = {

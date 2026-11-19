@@ -58,7 +58,7 @@ OpenTelemetry, MFA/TOTP, SSO/SCIM, tenancy, or object storage.
 
 | Capability | Evidence | Reliability |
 |---|---|---|
-| Organizations, users, roles, sessions, CSRF, password policy | `models.py`, `security.py`, `deps.py`, `tests/v2/test_auth_and_csrf.py` | Solid |
+| Organizations, users, roles, sessions, CSRF, password policy | `models.py`, `security.py`, `deps.py`, `tests/v2/test_auth_and_csrf.py`, `tests/v2/test_super_admin.py` | Solid (super admin gates) |
 | Employee system of record + org structure (departments, positions, managers) | 49 mapped tables, employee API/web, `test_employees.py` | Solid |
 | Leave types, balances, requests, approvals, accrual job | `services/leave.py`, `services/jobs.py`, `test_leave.py` | Solid |
 | Attendance, shifts, schedules, timesheets, biometric punch ingest | `services/attendance.py`, `timesheets.py`, `api/devices.py`, `test_time.py` | Solid |
@@ -102,7 +102,7 @@ Legend: **Done** = end-to-end + tests · **Partial** = core exists, material gap
 | Transfers, promotions, manager changes | **Done** | `ChangeRequest` + job-change approval, apply-if-due |
 | Time & attendance | **Done** | Attendance, shifts, schedules, timesheets, biometric punches |
 | Leave & holidays | **Partial** | Accrual + approvals; holidays are org-wide, not per location/legal entity |
-| Payroll processing | **Partial** | India-oriented runs; no off-cycle, loans/advances, reimbursements, garnishments, multi-currency FX |
+| Payroll processing | **Partial** | Country engines for India rules, UK PAYE/NI and German Lohnsteuer/social; no off-cycle, loans/advances, reimbursements, garnishments, multi-currency FX |
 | Statutory compliance & filings | **Partial → Missing** | Rules stored, but no returns, challans, Form 16/W-2, or e-filing exports |
 | Benefits administration | **Partial → Strong** | Country-aware plan catalog, tiers, dependants, eligibility rules, premiums, and payroll deduction linkage; carrier feeds/COBRA/ACA still missing |
 | Compensation review cycle | **Partial** | Compensation history/components; no cycle budget, merit matrix, or approval workflow |
@@ -174,29 +174,47 @@ slabs, wage bases, annualization, exemption caps, or employer/employee splits pe
 
 ### Europe (country-by-country, not one regime)
 
-**Status: reference country pack implemented; statutory engines not yet implemented.**
-`TaxRegime.UK_PAYE` remains an enum value only. `peawork/localization.py` now
-registers 12 European payroll markets (GB, DE, FR, IT, ES, NL, CH, PL, SE, BE,
-IE, AT) with currency, timezone, languages, tax-year start, pay frequencies,
-statutory leave, social schemes, filing names, and benefits notes. The catalogue
-is exposed at `GET /api/v1/metadata/countries` and `GET /api/v1/metadata/countries/{code}`.
+**Status: country pack implemented, plus per-country payroll engines for the UK and Germany.**
+`peawork/localization.py` registers 12 European payroll markets (GB, DE, FR,
+IT, ES, NL, CH, PL, SE, BE, IE, AT) with currency, timezone, languages,
+tax-year start, pay frequencies, statutory leave, social schemes, filing names,
+and benefits notes. The catalogue is exposed at `GET /api/v1/metadata/countries`
+and `GET /api/v1/metadata/countries/{code}`.
 
 **Implemented groundwork**
 
 - `CountryProfile` / `StatutoryScheme` registry with a stable payload contract
 - `reference_statutory_items()` for demos and payroll previews — explicitly marked `reference_only`
+- `reference_rule_templates()` for GB/DE, returning copy-and-review `StatutoryRuleVersion` payloads
 - `Employee.country_code` so country-scoped benefit eligibility can be enforced
 - Country-aware benefit plans (market, currency default, coverage tier, waiting period, eligibility JSON)
 - UI catalogue at `/admin/benefits` and API metadata for benefit types, tiers, and dependant relationships
 
-Reference rates in the pack are **planning defaults only**; configured
-`StatutoryRuleVersion` rows must win in production. Europe still cannot be served
-by one calculator. Remaining architecture:
+**Per-country payroll engines** (`peawork/payroll_engines.py`)
 
-- Per-country payroll engine selected by `LegalEntity.country_code`
-- Country-specific statutory rule schemas (JSON) validated per engine
-- Employer vs employee contributions, wage bases, ceilings, proration
-- Country outputs: payslip legal fields, filing formats, statutory reports
+- `PayrollCountryEngine` protocol; the engine is selected from the employee's
+  legal entity, then the employee's `country_code`, then the organisation
+  country, and unmatched countries use the generic engine.
+- Engines consume only their declared rule types; everything else still flows
+  through the legacy flat/ceiling rule applicator, so India's PF/ESI/PT/TDS
+  behaviour is unchanged.
+- UK (`gb_paye`): PAYE bands, personal allowance with the £100k taper, Class 1
+  National Insurance employee/employer bands, annualised by pay frequency.
+- Germany (`de_lohnsteuer`): reference Lohnsteuer tariff with progressive
+  marginal-rate ramps, solidarity surcharge free limit, and KV/PV/RV/AV branches
+  with contribution ceilings.
+- Statutory rule versions are now unique per (rule type, country, state), so a
+  single organisation can hold GB and DE rules side by side.
+- `GET /api/v1/metadata/payroll-engines` lists engine capabilities, and
+  `/metadata/countries/{code}` returns the engine plus reference rule templates.
+
+Reference rates in the pack are **planning defaults only**; configured
+`StatutoryRuleVersion` rows must win in production. Remaining architecture:
+
+- Filing submissions: UK RTI/FPS, German ELStAM/DEÜV — filing *descriptions* exist (UK `FPS`/`P60`/`P45` via `payroll_engines`, German `DEÜV`); real submissions against HMRC/Finanzamt still pending
+- German tax classes II–VI, church tax, and the full amtliches Tarif formula (the current engine is a documented approximation)
+- Remaining European jurisdictions (FR, IT, ES, NL, CH, PL, SE, BE, IE, AT) need their own engines
+- Proration for mid-period joiners/leavers and retro adjustments
 
 Representative country requirements (engineering scope):
 
@@ -310,13 +328,14 @@ which is a stronger differentiator than adding more shallow modules.
 | Metric | Value |
 |---|---|
 | Mapped database tables | 51 |
-| Alembic migrations | 17 (single head `c9d8e7f6a5b4`) |
-| REST API routes (`/api/v1`) | 138 |
+| Alembic migrations | 17 (single head `e7a8b9c0d1e2`) |
+| REST API routes (`/api/v1`) | 139 |
 | Web routes | 99 |
 | Service modules | 21 |
-| Tests | 386 passing across 17 files |
+| Tests | 409 passing across 19 files |
 | Supported UI locales | en, hi |
 | Country packs | 14 profiles (12 Europe + India + US) |
+| Payroll engines | UK PAYE/NI, German Lohnsteuer/social, generic fallback |
 | Payroll statutory rule types | PF, ESI, PT, TDS |
 | Tax regimes declared | India old/new, US federal, UK PAYE, generic |
-| Tax regimes implemented | India flat-rule only |
+| Tax regimes implemented | India flat rules, UK PAYE/NI, German Lohnsteuer approximation |

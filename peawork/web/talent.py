@@ -30,8 +30,8 @@ from .forms import FormError, parse_date, text
 
 router = APIRouter(dependencies=[Depends(csrf_guard)])
 
-HR_ROLES = {Role.ADMIN, Role.HR}
-TALENT_ROLES = {Role.ADMIN, Role.HR, Role.MANAGER, Role.EMPLOYEE}
+HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
+TALENT_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.MANAGER, Role.EMPLOYEE}
 READ_ONLY_ROLES = {Role.AUDITOR, Role.PAYROLL}
 
 STATUS_LABELS = {

@@ -37,7 +37,7 @@ def _get_timesheet(db: Session, org_id: UUID, timesheet_id: UUID) -> Timesheet:
 
 
 def _can_view(user: User, employee: Employee | None) -> bool:
-    if user.role in {Role.ADMIN, Role.HR, Role.AUDITOR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}:
         return True
     if employee is None:
         return False
@@ -47,7 +47,7 @@ def _can_view(user: User, employee: Employee | None) -> bool:
 
 
 def _can_edit(user: User, timesheet: Timesheet) -> bool:
-    if user.role in {Role.ADMIN, Role.HR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         return True
     return bool(user.employee_id and timesheet.employee_id == user.employee_id)
 
@@ -70,7 +70,7 @@ def create_timesheet(
         raise ValidationError("week_start must be a Monday")
 
     # Only self (or admin/hr on behalf) may create for an employee.
-    if actor.role not in {Role.ADMIN, Role.HR}:
+    if actor.role not in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         if not actor.employee_id or actor.employee_id != employee.id:
             raise ForbiddenError("Not authorized to create a timesheet for this employee")
 
@@ -213,7 +213,7 @@ def decide_timesheet(
     employee = _employee_or_404(db, org_id, timesheet.employee_id)
 
     # Admin/HR may decide; managers only for direct reports, never their own.
-    is_admin_hr = actor.role in {Role.ADMIN, Role.HR}
+    is_admin_hr = actor.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
     is_manager_of = bool(
         actor.employee_id
         and employee.manager_id == actor.employee_id
@@ -264,7 +264,7 @@ def list_timesheets(
     if employee_id is not None:
         stmt = stmt.where(Timesheet.employee_id == employee_id)
 
-    if user.role in {Role.ADMIN, Role.HR, Role.AUDITOR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}:
         pass
     elif user.role == Role.MANAGER and user.employee_id:
         stmt = stmt.where(

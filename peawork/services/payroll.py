@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -16,6 +17,7 @@ from ..models import (
     Employee,
     EmployeeBenefit,
     LegalEntity,
+    Organization,
     PayComponent,
     PayrollRun,
     Payslip,
@@ -36,9 +38,18 @@ from ..domain import (
     StatutoryRuleType,
 )
 from ..localization import get_country_profile, normalize_country
+from ..payroll_engines import (
+    STATUTORY_LABELS,
+    PayrollResult,
+    StatutoryRule,
+    compute_country_payroll,
+    money,
+)
 from . import audit as audit_service
 from . import policy
 from .errors import ConflictError, NotFoundError, ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 def _as_uuid(value) -> UUID:
@@ -54,14 +65,6 @@ def _as_date(value):
         from datetime import date as _date
         return _date.fromisoformat(value)
     return value
-
-
-STATUTORY_LABELS = {
-    StatutoryRuleType.PF: "Provident Fund",
-    StatutoryRuleType.ESI: "Employee State Insurance",
-    StatutoryRuleType.PT: "Professional Tax",
-    StatutoryRuleType.TDS: "Tax Deducted at Source",
-}
 
 
 def compute_statutory_item(rule_type: StatutoryRuleType, wages: Decimal, rates: dict) -> dict | None:
@@ -111,24 +114,108 @@ def compute_statutory_item(rule_type: StatutoryRuleType, wages: Decimal, rates: 
 
 
 def statutory_items_for(db: Session, org_id: UUID, wages: Decimal) -> list[dict]:
-    """Load active statutory rule versions and compute items for given wages."""
-    items: list[dict] = []
-    for rule_type in StatutoryRuleType:
-        rule = db.scalar(
-            select(StatutoryRuleVersion)
-            .where(
-                StatutoryRuleVersion.org_id == org_id,
-                StatutoryRuleVersion.rule_type == rule_type,
-                StatutoryRuleVersion.active,
-            )
-            .order_by(StatutoryRuleVersion.effective_from.desc())
-        )
-        if rule is None:
-            continue
-        item = compute_statutory_item(rule_type, wages, rule.rates or {})
-        if item is not None:
-            items.append(item)
+    """Legacy helper: compute statutory items for the organisation's country."""
+    org_country = db.scalar(
+        select(Organization.country_code).where(Organization.id == org_id)
+    )
+    country = normalize_country(org_country or "IN")
+    items, _ = country_statutory_items(db, org_id, country=country, gross=wages, as_of=None)
     return items
+
+
+def resolve_employee_country(
+    db: Session, org_id: UUID, employee: Employee | None
+) -> str:
+    """Country payroll engine selection: legal entity, employee, organisation."""
+    if employee is not None:
+        if employee.legal_entity_id:
+            entity = db.get(LegalEntity, employee.legal_entity_id)
+            if entity is not None and entity.country_code:
+                return normalize_country(entity.country_code)
+        if employee.country_code:
+            return normalize_country(employee.country_code)
+    org_country = db.scalar(
+        select(Organization.country_code).where(Organization.id == org_id)
+    )
+    return normalize_country(org_country or "IN")
+
+
+def active_statutory_rules(
+    db: Session, org_id: UUID, country_code: str, as_of: date | None = None
+) -> list[StatutoryRuleVersion]:
+    """Latest effective rule per rule type for a country on ``as_of``."""
+    on = as_of or utcnow().date()
+    rows = db.scalars(
+        select(StatutoryRuleVersion)
+        .where(
+            StatutoryRuleVersion.org_id == org_id,
+            StatutoryRuleVersion.active.is_(True),
+            StatutoryRuleVersion.country_code == country_code,
+            StatutoryRuleVersion.effective_from <= on,
+            or_(
+                StatutoryRuleVersion.effective_to.is_(None),
+                StatutoryRuleVersion.effective_to >= on,
+            ),
+        )
+        .order_by(
+            StatutoryRuleVersion.rule_type, StatutoryRuleVersion.effective_from.desc()
+        )
+    ).all()
+    latest: dict[str, StatutoryRuleVersion] = {}
+    for row in rows:
+        key = row.rule_type.value if hasattr(row.rule_type, "value") else str(row.rule_type)
+        latest.setdefault(key, row)
+    return list(latest.values())
+
+
+def country_statutory_items(
+    db: Session,
+    org_id: UUID,
+    *,
+    country: str,
+    gross: Decimal,
+    as_of: date | None,
+    pay_frequency: str = "monthly",
+    currency: str = "INR",
+    tax_regime: str | None = None,
+) -> tuple[list[dict], "PayrollResult"]:
+    """Run the country payroll engine and return legacy-shaped items."""
+    rules = [
+        StatutoryRule(
+            rule_type=row.rule_type.value if hasattr(row.rule_type, "value") else str(row.rule_type),
+            country_code=row.country_code,
+            rates=row.rates or {},
+            effective_from=row.effective_from,
+            effective_to=row.effective_to,
+            state_code=row.state_code,
+        )
+        for row in active_statutory_rules(db, org_id, country, as_of)
+    ]
+    result = compute_country_payroll(
+        country_code=country,
+        gross=gross,
+        currency=currency,
+        pay_frequency=pay_frequency,
+        as_of=as_of or utcnow().date(),
+        rules=rules,
+        tax_regime=tax_regime,
+    )
+    for warning in result.warnings:
+        logger.warning("payroll engine %s: %s", result.engine, warning)
+    items = [
+        {
+            "rule_type": line.code,
+            "name": line.name,
+            "line_type": (
+                PayComponentType.TAX if line.category == "tax" else PayComponentType.DEDUCTION
+            ),
+            "employee_amount": money(line.employee_amount),
+            "employer_amount": money(line.employer_amount),
+            "base": line.base,
+        }
+        for line in result.lines
+    ]
+    return items, result
 
 
 def next_payroll_number(db: Session, org_id: UUID) -> str:
@@ -153,7 +240,7 @@ def create_pay_component(
     db: Session, *, org_id: UUID, actor: User, data: dict
 ) -> PayComponent:
     """Create a new pay component (e.g., Basic, HRA, PF)."""
-    if actor.role.value not in {"admin", "hr", "payroll"}:
+    if actor.role.value not in {"admin", "super_admin", "hr", "payroll"}:
         raise ValidationError("Only HR/payroll roles may create pay components")
 
     # Check duplicate code within org
@@ -290,7 +377,7 @@ def create_payroll_run(
     db: Session, *, org_id: UUID, actor: User, data: dict
 ) -> PayrollRun:
     """Create a new payroll run."""
-    if actor.role.value not in {"admin", "hr", "payroll"}:
+    if actor.role.value not in {"admin", "super_admin", "hr", "payroll"}:
         raise ValidationError("Only HR/payroll roles may create payroll runs")
 
     # Check for existing run in period
@@ -372,8 +459,20 @@ def _compute_employee_payslip(
         else:
             total_deductions += cc.amount
 
-    # Statutory lines (PF/ESI/PT/TDS) from active rule versions.
-    for item in statutory_items_for(db, org_id, gross):
+    # Statutory lines from the country engine selected for this employee.
+    employee = db.get(Employee, employee_id)
+    country = resolve_employee_country(db, org_id, employee)
+    items, _result = country_statutory_items(
+        db,
+        org_id,
+        country=country,
+        gross=gross,
+        as_of=as_of,
+        pay_frequency=str(comp.payroll_frequency),
+        currency=comp.currency,
+        tax_regime=str(comp.tax_regime),
+    )
+    for item in items:
         lines.append({
             "component_id": None,
             "component_name": item["name"],
@@ -779,7 +878,7 @@ def create_benefit_plan(
     db: Session, *, org_id: UUID, actor: User, data: dict
 ) -> BenefitPlan:
     """Create a country-aware benefit plan (e.g. global health insurance)."""
-    if actor.role.value not in {"admin", "hr"}:
+    if actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ValidationError("Only HR roles may create benefit plans")
 
     code = str(data.get("code") or "").strip().upper()
@@ -835,7 +934,7 @@ def update_benefit_plan(
     db: Session, *, org_id: UUID, actor: User, plan_id: UUID, data: dict
 ) -> BenefitPlan:
     """Update a benefit plan's commercial and eligibility terms."""
-    if actor.role.value not in {"admin", "hr"}:
+    if actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ValidationError("Only HR roles may update benefit plans")
     plan = db.get(BenefitPlan, _as_uuid(plan_id))
     if not plan or plan.org_id != org_id:
@@ -1094,31 +1193,40 @@ def create_statutory_rule_version(
     db: Session, *, org_id: UUID, actor: User, data: dict
 ) -> StatutoryRuleVersion:
     """Create a statutory rule version (PF, ESI, PT, TDS rates with effective dates)."""
-    if actor.role.value not in {"admin", "hr"}:
+    if actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ValidationError("Only HR roles may create statutory rule versions")
 
     rule_type = data.get("rule_type")
     if rule_type not in {e.value for e in StatutoryRuleType}:
         raise ConflictError(f"Invalid rule_type. Must be one of: {[e.value for e in StatutoryRuleType]}")
 
-    # Check for existing active version for this rule type and org
+    rule_enum = StatutoryRuleType(rule_type)
+    country_code = normalize_country(data.get("country_code") or "IN")
+    state_code = data.get("state_code")
+
+    # One active version per (rule type, country, state) so multi-country
+    # organisations can keep GB and IN rules side by side.
     existing = db.scalar(
         select(StatutoryRuleVersion.id).where(
             StatutoryRuleVersion.org_id == org_id,
             StatutoryRuleVersion.rule_type == rule_type,
+            StatutoryRuleVersion.country_code == country_code,
+            StatutoryRuleVersion.state_code.is_(None)
+            if not state_code
+            else StatutoryRuleVersion.state_code == state_code,
             StatutoryRuleVersion.active,
         )
     )
     if existing:
-        raise ConflictError(f"A active statutory rule version already exists for {rule_type}")
-
-    rule_enum = StatutoryRuleType(rule_type)
+        raise ConflictError(
+            f"An active statutory rule version already exists for {rule_type}/{country_code}"
+        )
 
     plan = StatutoryRuleVersion(
         org_id=org_id,
         rule_type=rule_enum,
-        country_code=data.get("country_code", "IN"),
-        state_code=data.get("state_code"),
+        country_code=country_code,
+        state_code=state_code,
         effective_from=_as_date(data["effective_from"]),
         effective_to=_as_date(data.get("effective_to")) if data.get("effective_to") else None,
         version=data.get("version", 1),

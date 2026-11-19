@@ -81,15 +81,28 @@ def _xlsx_response(content: bytes, filename: str) -> Response:
 
 
 def _users_context(db: Session, user: User) -> dict:
-    users = list(db.scalars(select(User).where(User.org_id == user.org_id).order_by(User.full_name)).all())
-    employees = list(
-        db.scalars(
-            select(Employee)
-            .where(Employee.org_id == user.org_id)
-            .order_by(Employee.first_name, Employee.last_name)
-        ).all()
-    )
+    stmt = select(User).order_by(User.full_name)
+    if not user.is_super_admin:
+        stmt = stmt.where(User.org_id == user.org_id)
+    users = list(db.scalars(stmt).all())
+    stmt = select(Employee)
+    if not user.is_super_admin:
+        stmt = stmt.where(Employee.org_id == user.org_id)
+    stmt = stmt.order_by(Employee.first_name, Employee.last_name)
+    employees = list(db.scalars(stmt).all())
     return {"users": users, "employees": employees, "roles": list(Role)}
+
+
+def _selected_org(db: Session, user: User, org_id: str | None = None) -> Organization | None:
+    """A super admin may select any organisation; others see only their own."""
+    if user.is_super_admin and org_id:
+        try:
+            org = db.get(Organization, UUID(org_id))
+        except (ValueError, TypeError):
+            org = None
+        if org is not None:
+            return org
+    return db.get(Organization, user.org_id)
 
 
 @router.get("/admin/users")
@@ -131,6 +144,8 @@ def admin_user_create(
             employee_id=parse_uuid(employee_id, "Employee"),
             password=raw_password,
         )
+        if data.role.is_admin_role and not user.is_super_admin:
+            raise ValidationError("Only super admins can create administrators")
         existing = db.scalar(select(User.id).where(User.email == str(data.email).lower()))
         if existing:
             raise ConflictError("A user with this email already exists")
@@ -194,11 +209,17 @@ def admin_user_role(
     if target is None or target.org_id != user.org_id:
         return RedirectResponse("/admin/users?error=User+not+found", status_code=303)
     new_role = Role(role)
-    if target.role == Role.ADMIN and new_role != Role.ADMIN:
+    if not user.is_super_admin and new_role.is_admin_role:
+        return RedirectResponse(
+            "/admin/users?error=Only+super+admins+can+add+admins", status_code=303
+        )
+    if target.role.is_admin_role and not new_role.is_admin_role:
         active_admins = int(
             db.scalar(
                 select(func.count(User.id)).where(
-                    User.org_id == user.org_id, User.role == Role.ADMIN, User.active.is_(True)
+                    User.org_id == user.org_id,
+                    User.role.in_([Role.ADMIN, Role.SUPER_ADMIN]),
+                    User.active.is_(True),
                 )
             )
             or 0
@@ -330,13 +351,22 @@ def admin_settings(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user(Role.ADMIN)),
+    org_id: str | None = None,
 ):
-    org = db.get(Organization, user.org_id)
+    org = _selected_org(db, user, org_id)
+    if org is None:
+        return RedirectResponse("/admin/settings?error=Organisation+not+found", status_code=303)
+    organisations = []
+    if user.is_super_admin:
+        organisations = list(
+            db.scalars(select(Organization).order_by(Organization.name)).all()
+        )
     return render(
         request,
         "admin/settings.html",
         organization=org,
-        **_data_counts(db, user.org_id),
+        organisations=organisations,
+        **_data_counts(db, org.id),
     )
 
 
@@ -350,9 +380,10 @@ def admin_settings_update(
     address: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_user(Role.ADMIN)),
+    org_id: str | None = None,
 ):
-    org = db.get(Organization, user.org_id)
-    if org is None:
+    org = _selected_org(db, user, org_id)
+    if org is None or (not user.is_super_admin and org.id != user.org_id):
         return RedirectResponse("/admin/settings?error=Organisation+not+found", status_code=303)
     org.name = name.strip()
     org.legal_name = legal_name.strip() or None

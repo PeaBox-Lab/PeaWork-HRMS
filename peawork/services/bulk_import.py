@@ -437,7 +437,7 @@ def import_employees(
     upload. Missing departments and positions are created when ``auto_create``
     is enabled; managers may be referenced by email or employee number.
     """
-    if actor.role.value not in {"admin", "hr"}:
+    if actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ForbiddenError("Only HR or administrators may import employees")
 
     _, rows = _read_table(filename, content)

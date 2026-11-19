@@ -195,7 +195,7 @@ def file_path(document: Document) -> Path:
 def delete_document(
     db: Session, *, actor: User, document_id: UUID, request=None
 ) -> None:
-    if actor.role.value not in {"admin", "hr"}:
+    if actor.role.value not in {"admin", "super_admin", "hr"}:
         raise ForbiddenError("Only HR or administrators may delete documents")
     document = get_document(db, actor=actor, document_id=document_id)
     path = file_path(document)
@@ -271,7 +271,7 @@ def acknowledge_document(
     # Employees acknowledge for themselves; HR/admin may acknowledge on behalf
     # of the person the document belongs to.
     if doc_employee_id and actor.employee_id and actor.employee_id != doc_employee_id:
-        if actor.role.value not in {"admin", "hr"}:
+        if actor.role.value not in {"admin", "super_admin", "hr"}:
             raise ForbiddenError("You may only acknowledge documents that belong to you")
 
     # Determine the acknowledger_employee_id to store.

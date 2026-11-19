@@ -137,7 +137,7 @@ def cmd_seed_demo(args: argparse.Namespace, settings: Settings) -> int:
         if org is None:
             raise SystemExit("No organisation found. Run `python -m peawork init` first.")
         admin = db.scalar(
-            select(User).where(User.org_id == org.id, User.role == Role.ADMIN).limit(1)
+            select(User).where(User.org_id == org.id, user.role in {Role.ADMIN, Role.SUPER_ADMIN}).limit(1)
         )
         if admin is None:
             raise SystemExit("No administrator found. Run `python -m peawork create-admin` first.")
@@ -159,7 +159,7 @@ def _admin_actor(db):
     if org is None:
         raise SystemExit("No organisation found. Run `python -m peawork init` first.")
     admin = db.scalar(
-        select(User).where(User.org_id == org.id, User.role == Role.ADMIN).limit(1)
+        select(User).where(User.org_id == org.id, user.role in {Role.ADMIN, Role.SUPER_ADMIN}).limit(1)
     )
     if admin is None:
         raise SystemExit("No administrator found. Run `python -m peawork create-admin` first.")
@@ -290,7 +290,7 @@ def cmd_check(args: argparse.Namespace, settings: Settings) -> int:
         users = int(db.scalar(select(func.count(User.id))) or 0)
         employees = int(db.scalar(select(func.count(Employee.id))) or 0)
         admins = int(
-            db.scalar(select(func.count(User.id)).where(User.role == Role.ADMIN, User.active.is_(True)))
+            db.scalar(select(func.count(User.id)).where(user.role in {Role.ADMIN, Role.SUPER_ADMIN}, User.active.is_(True)))
             or 0
         )
         print(f"  Organisation: {org.name if org else 'missing'}")

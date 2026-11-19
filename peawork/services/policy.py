@@ -9,14 +9,30 @@ from ..domain import Role
 from ..models import Document, Employee, LeaveRequest, User
 
 # Roles that may read organisation-wide people data.
-ORG_READ_ROLES = {Role.ADMIN, Role.HR, Role.AUDITOR}
-ORG_WRITE_ROLES = {Role.ADMIN, Role.HR}
-PAYROLL_ROLES = {Role.ADMIN, Role.PAYROLL}
-APPROVER_ROLES = {Role.ADMIN, Role.HR, Role.MANAGER}
+ORG_READ_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}
+ORG_WRITE_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
+PAYROLL_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.PAYROLL}
+APPROVER_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.MANAGER}
 
 
 def is_admin(user: User) -> bool:
-    return user.role == Role.ADMIN
+    return user.role in {Role.ADMIN, Role.SUPER_ADMIN}
+
+
+def is_super_admin(user: User) -> bool:
+    """A platform super administrator: admin of every organisation."""
+    return user.role == Role.SUPER_ADMIN
+
+
+def visible_org_ids(user: User) -> set[UUID] | None:
+    """Organisations whose masters a user may see.
+
+    ``None`` means "all" (super admin); others see only their own
+    organisation.
+    """
+    if is_super_admin(user):
+        return None
+    return {user.org_id}
 
 
 def is_privileged_reader(user: User) -> bool:
@@ -65,7 +81,7 @@ def can_view_leave(user: User, leave: LeaveRequest) -> bool:
 
 
 def can_approve_leave(user: User, leave: LeaveRequest) -> bool:
-    if user.role in {Role.ADMIN, Role.HR}:
+    if user.role in {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}:
         return True
     if user.role == Role.MANAGER:
         return is_manager_of(user, leave.employee) and not is_self(user, leave.employee)

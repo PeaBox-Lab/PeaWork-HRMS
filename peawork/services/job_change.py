@@ -129,7 +129,7 @@ _FIELD_LABELS = {
     "manager_id": "Manager",
 }
 
-_HR_ROLES = {Role.ADMIN, Role.HR}
+_HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
 
 
 def _utcnow() -> datetime:

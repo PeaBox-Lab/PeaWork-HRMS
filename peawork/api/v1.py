@@ -14,17 +14,12 @@ from ..domain import AuditAction, DocumentCategory, JobStatus, Role, TimesheetSt
 from ..models import (
     AuditEvent,
     BiometricDevice,
-    CalibrationEntry,
-    CalibrationRound,
     Department,
-    DevelopmentGoal,
     Employee,
-    EmployeeSkill,
     LeaveType,
     PayrollRun,
     Position,
     Shift,
-    Skill,
     User,
     WorkSchedule,
 )
@@ -187,13 +182,13 @@ def api_departments(
     db: Session = Depends(get_db),
     user: User = Depends(require_user()),
 ):
-    return list(
-        db.scalars(
-            select(Department)
-            .where(Department.org_id == user.org_id, Department.active.is_(True))
-            .order_by(Department.name)
-        ).all()
-    )
+    from ..services import policy
+
+    stmt = select(Department).where(Department.active.is_(True))
+    org_ids = policy.visible_org_ids(user)
+    if org_ids is not None:
+        stmt = stmt.where(Department.org_id.in_(org_ids))
+    return list(db.scalars(stmt.order_by(Department.name)).all())
 
 
 @router.post("/departments", response_model=DepartmentOut, status_code=201)
@@ -236,13 +231,13 @@ def api_positions(
     db: Session = Depends(get_db),
     user: User = Depends(require_user()),
 ):
-    return list(
-        db.scalars(
-            select(Position)
-            .where(Position.org_id == user.org_id, Position.active.is_(True))
-            .order_by(Position.title)
-        ).all()
-    )
+    from ..services import policy
+
+    stmt = select(Position).where(Position.active.is_(True))
+    org_ids = policy.visible_org_ids(user)
+    if org_ids is not None:
+        stmt = stmt.where(Position.org_id.in_(org_ids))
+    return list(db.scalars(stmt.order_by(Position.title)).all())
 
 
 @router.post("/positions", response_model=PositionOut, status_code=201)
@@ -279,11 +274,13 @@ def api_leave_types(
     db: Session = Depends(get_db),
     user: User = Depends(require_user()),
 ):
-    return list(
-        db.scalars(
-            select(LeaveType).where(LeaveType.org_id == user.org_id, LeaveType.active.is_(True))
-        ).all()
-    )
+    from ..services import policy
+
+    stmt = select(LeaveType).where(LeaveType.active.is_(True))
+    org_ids = policy.visible_org_ids(user)
+    if org_ids is not None:
+        stmt = stmt.where(LeaveType.org_id.in_(org_ids))
+    return list(db.scalars(stmt).all())
 
 
 @router.get("/leave/balances", response_model=list[LeaveBalanceOut])
@@ -780,7 +777,7 @@ def api_payslip(
             raise ForbiddenError("Not authorized to view this payslip")
 
     # Field-level masking: only payroll/admin see amounts; employee sees own.
-    masked = user.role.value not in {"admin", "payroll"} and (
+    masked = user.role.value not in {"admin", "super_admin", "payroll"} and (
         not user.employee_id or payslip.employee_id != user.employee_id
     )
     lines = db.scalars(select(PayslipLine).where(PayslipLine.payslip_id == payslip_id)).all()
@@ -978,12 +975,23 @@ def api_country(
     code: str,
     user: User = Depends(require_user()),
 ):
-    from ..localization import country_payload, get_country_profile
+    from ..localization import country_payload, get_country_profile, reference_rule_templates
+    from ..payroll_engines import get_payroll_engine
 
     profile = get_country_profile(code)
     if profile is None:
         raise NotFoundError(f"Unsupported country code: {code}")
-    return country_payload(profile)
+    payload = country_payload(profile)
+    payload["payroll_engine"] = get_payroll_engine(profile.code).capabilities()
+    payload["reference_rules"] = reference_rule_templates(profile.code)
+    return payload
+
+
+@router.get("/metadata/payroll-engines", response_model=list[dict])
+def api_payroll_engines(user: User = Depends(require_user())):
+    from ..payroll_engines import list_payroll_engines
+
+    return list_payroll_engines()
 
 
 @router.get("/metadata/benefit-catalog", response_model=dict)
@@ -1478,7 +1486,13 @@ def api_jobs(
     db: Session = Depends(get_db),
     user: User = Depends(require_user(Role.ADMIN, Role.HR)),
 ):
-    return [_job_out(j) for j in jobs_service.list_jobs(db, org_id=user.org_id, user=user, status=status)]
+    from ..services import policy
+
+    org_id = None if policy.is_super_admin(user) else user.org_id
+    return [
+        _job_out(j)
+        for j in jobs_service.list_jobs(db, org_id=org_id, user=user, status=status)
+    ]
 
 
 @router.post("/jobs/enqueue", status_code=201)

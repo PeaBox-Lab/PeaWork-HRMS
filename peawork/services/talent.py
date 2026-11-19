@@ -27,7 +27,7 @@ from ..services.jobs import enqueue as _job_enqueue
 
 def _require_reviewer(user) -> None:
     """Only admin/HR may manage review cycles."""
-    if user.role not in { "admin", "hr" }:
+    if user.role not in { "admin", "super_admin", "hr" }:
         raise ValidationError("Only admin/HR may manage review cycles")
 
 
@@ -85,7 +85,7 @@ def list_cycles(db: Session, *, org_id, user) -> list[dict]:
 
     stmt = select(ReviewCycle).where(ReviewCycle.org_id == org_id)
 
-    if user.role in {"admin", "hr"}:
+    if user.role in {"admin", "super_admin", "hr"}:
         pass
     elif user.role == "manager" and user.employee_id:
         stmt = stmt.where(ReviewCycle.created_by == user.employee_id)
@@ -252,7 +252,7 @@ def list_goals(db: Session, *, org_id, user) -> list[dict]:
 
     stmt = select(Goal).where(Goal.org_id == org_id)
 
-    if user.role in {"admin", "hr"}:
+    if user.role in {"admin", "super_admin", "hr"}:
         pass  # org-wide view
     elif user.role == "manager":
         # managers see their goals and goals of employees they manage
@@ -403,9 +403,9 @@ def list_goal_progress(db: Session, *, org_id, goal_id: str) -> list[dict]:
 # R4: Check-ins
 # ---------------------------------------------------------------------------
 
-_HR_ROLES = {Role.ADMIN, Role.HR}
+_HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
 # Roles that may read any employee's talent data.
-_READ_ALL_ROLES = {Role.ADMIN, Role.HR, Role.AUDITOR}
+_READ_ALL_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}
 
 
 def _is_hr(user) -> bool:

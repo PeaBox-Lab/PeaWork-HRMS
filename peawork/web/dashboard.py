@@ -30,7 +30,7 @@ def dashboard(
         db.scalar(select(func.count()).select_from(scope.order_by(None).subquery())) or 0
     )
 
-    pending = pending_approvals(db, user, limit=5) if user.role.value in {"admin", "hr", "manager"} else []
+    pending = pending_approvals(db, user, limit=5) if user.role.value in {"admin", "super_admin", "hr", "manager"} else []
     leaves, leave_count = list_leave_requests(db, actor=user, limit=6)
     _, pending_count = list_leave_requests(db, actor=user, status="pending", limit=1)
 

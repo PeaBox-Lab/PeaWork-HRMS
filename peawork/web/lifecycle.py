@@ -37,7 +37,7 @@ from .forms import FormError, parse_date, parse_uuid, text
 
 router = APIRouter(dependencies=[Depends(csrf_guard)])
 
-HR_ROLES = {Role.ADMIN, Role.HR}
+HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
 READ_ONLY_ROLES = {Role.AUDITOR, Role.PAYROLL}
 LIMIT = 200
 

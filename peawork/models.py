@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from enum import StrEnum
-from peawork.domain import CheckInStatus
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,6 +23,8 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     false,
+    text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -128,10 +129,16 @@ class User(TimestampMixin, Base):
     role: Mapped[Role] = mapped_column(enum_col(Role), default=Role.EMPLOYEE, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    @property
+    def is_super_admin(self) -> bool:
+        return self.role == Role.SUPER_ADMIN
     is_sample: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false(), nullable=False
     )
-    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     mfa_backup_codes: Mapped[str | None] = mapped_column(String, nullable=True)  # JSON-encoded list
     employee_id: Mapped[UUID | None] = mapped_column(
@@ -264,6 +271,9 @@ class Employee(TimestampMixin, Base):
     position_id: Mapped[UUID | None] = mapped_column(ForeignKey("positions.id", ondelete="SET NULL"))
     manager_id: Mapped[UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
     location: Mapped[str | None] = mapped_column(String(120), default="Gurugram")
+    legal_entity_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("legal_entities.id", ondelete="SET NULL"), index=True
+    )
     country_code: Mapped[str | None] = mapped_column(String(2))
     pan_masked: Mapped[str | None] = mapped_column(String(32))
     bank_masked: Mapped[str | None] = mapped_column(String(32))
@@ -1090,9 +1100,12 @@ class BenefitPlan(TimestampMixin, Base):
     coverage_tier: Mapped[BenefitCoverageTier] = mapped_column(
         enum_col(BenefitCoverageTier),
         default=BenefitCoverageTier.EMPLOYEE_ONLY,
+        server_default="employee_only",
         nullable=False,
     )
-    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(3), default="INR", server_default="INR", nullable=False
+    )
     employer_contribution: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), default=Decimal("0"), nullable=False
     )
@@ -1100,10 +1113,10 @@ class BenefitPlan(TimestampMixin, Base):
         Numeric(12, 2), default=Decimal("0"), nullable=False
     )
     payroll_deduction: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False
+        Boolean, default=True, server_default=true(), nullable=False
     )
     waiting_period_days: Mapped[int] = mapped_column(
-        Integer, default=0, nullable=False
+        Integer, default=0, server_default=text("0"), nullable=False
     )
     eligibility: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
@@ -1135,18 +1148,27 @@ class EmployeeBenefit(TimestampMixin, Base):
     coverage_tier: Mapped[BenefitCoverageTier] = mapped_column(
         enum_col(BenefitCoverageTier),
         default=BenefitCoverageTier.EMPLOYEE_ONLY,
+        server_default="employee_only",
         nullable=False,
     )
     coverage_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     employee_premium: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), default=Decimal("0"), nullable=False
+        Numeric(12, 2),
+        default=Decimal("0"),
+        server_default=text("0"),
+        nullable=False,
     )
     employer_premium: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), default=Decimal("0"), nullable=False
+        Numeric(12, 2),
+        default=Decimal("0"),
+        server_default=text("0"),
+        nullable=False,
     )
-    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(3), default="INR", server_default="INR", nullable=False
+    )
     payroll_deduction: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False
+        Boolean, default=True, server_default=true(), nullable=False
     )
     status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
     ends_on: Mapped[date | None] = mapped_column(Date)

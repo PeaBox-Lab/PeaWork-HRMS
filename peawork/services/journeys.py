@@ -35,8 +35,8 @@ from ..models import (
 from . import audit
 from .errors import ForbiddenError, NotFoundError, ValidationError
 
-_HR_ROLES = {Role.ADMIN, Role.HR}
-_READ_ALL_ROLES = {Role.ADMIN, Role.HR, Role.AUDITOR}
+_HR_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR}
+_READ_ALL_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.HR, Role.AUDITOR}
 
 # Default templates are seeded per organisation on first use. Tenants can edit
 # them later without a migration.
