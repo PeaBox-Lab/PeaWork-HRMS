@@ -307,6 +307,27 @@ def test_germany_church_tax():
     assert church_tax.category == "tax"
 
 
+def test_germany_weekly_tax_class_w():
+    rules = _rules("DE")
+    for rule in rules:
+        if rule.rule_type == "income_tax":
+            rule.rates["tax_class"] = "W"
+    result = compute_country_payroll(
+        country_code="DE",
+        gross=Decimal("5000"),
+        currency="EUR",
+        pay_frequency="weekly",
+        as_of=date(2026, 11, 30),
+        rules=rules,
+    )
+    codes = {line.code for line in result.lines}
+    assert "lohnsteuer" not in codes
+    assert "church_tax" not in codes
+    assert any("class W" in warning for warning in result.warnings)
+    # Social insurance still applies for weekly classes.
+    assert _line(result, "kv") is not None
+
+
 def test_missing_country_rules_produce_warnings():
     result = compute_country_payroll(
         country_code="GB",

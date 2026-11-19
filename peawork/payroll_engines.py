@@ -741,6 +741,14 @@ class GermanyEngine:
         {StatutoryRuleType.INCOME_TAX.value, StatutoryRuleType.SOCIAL_SECURITY.value}
     )
 
+    @staticmethod
+    def _tax_class(rates: Mapping[str, Any]) -> str:
+        """Normalised German tax class: ``A1``..``A6`` or ``W`` (weekly)."""
+        tax_class = str(rates.get("tax_class") or "1").upper()
+        if tax_class.startswith("A"):
+            tax_class = tax_class[1:]
+        return tax_class or "1"
+
     def compute(self, context: PayrollContext) -> PayrollResult:
         lines: list[PayrollLine] = []
         warnings: list[str] = []
@@ -749,6 +757,10 @@ class GermanyEngine:
         tax_rule = context.rule(StatutoryRuleType.INCOME_TAX)
         if tax_rule is None:
             warnings.append("No German income_tax rule configured; Lohnsteuer not calculated.")
+        elif self._tax_class(tax_rule.rates or {}) == "W":
+            warnings.append(
+                "German tax class W (weekly): no Lohnsteuer or church tax is withheld; value-added tax rules apply."
+            )
         else:
             rates = tax_rule.rates or {}
             allowance = self._tax_class_allowance(rates)
@@ -888,8 +900,8 @@ class GermanyEngine:
             "implemented": True,
             "supported_rule_types": sorted(self.consumed_rule_types),
             "filings": ["DEUV"],
-            "tax_classes": ["A1", "A2", "A3", "A4", "A5", "A6"],
-            "notes": "DEUV submission payload via GZS1-style API; tax classes A1-A3 share the personal allowance, A4/A5/A6 use class_allowance; church tax modelled. Tax class W and ELStAM are not modelled.",
+            "tax_classes": ["A1", "A2", "A3", "A4", "A5", "A6", "W"],
+            "notes": "DEUV submission payload via GZS1-style API; tax classes A1-A3 share the personal allowance, A4/A5/A6 use class_allowance, W (weekly) omits Lohnsteuer; church tax modelled. Tax class W is supported; ELStAM is not modelled.",
         }
 
 

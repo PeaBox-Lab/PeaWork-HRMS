@@ -332,7 +332,7 @@ which is a stronger differentiator than adding more shallow modules.
 | REST API routes (`/api/v1`) | 140 |
 | Web routes | 99 |
 | Service modules | 21 |
-| Tests | 413 passing across 19 files |
+| Tests | 414 passing across 19 files |
 | Supported UI locales | en, hi |
 | Country packs | 14 profiles (12 Europe + India + US) |
 | Payroll engines | UK PAYE/NI, German Lohnsteuer/social + tax classes + church tax, generic fallback |

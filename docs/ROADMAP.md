@@ -207,7 +207,7 @@ plus a country-aware healthcare/insurance benefits layer that feeds payroll.
 - [x] Payroll: active employee premiums become deduction lines; employer premiums become employer-contribution lines; effective/end dates honoured.
 - [x] `PayrollCountryEngine` protocol (`peawork/payroll_engines.py`) selected by employee/organisation country.
 - [x] UK engine: PAYE bands, personal-allowance taper and Class 1 National Insurance, annualised per pay frequency.
-- [x] German engine: reference Lohnsteuer tariff with progression zones, solidarity surcharge free limit, social insurance branches (KV/PV/RV/AV), tax classes A1–A6 and church tax on Lohnsteuer.
+- [x] German engine: reference Lohnsteuer tariff with progression zones, solidarity surcharge free limit, social insurance branches (KV/PV/RV/AV), tax classes A1–A6 and weekly class W, church tax on Lohnsteuer.
 - [x] Reference rule templates for GB/DE exposed at `/api/v1/metadata/countries/{code}`; engines listed at `/api/v1/metadata/payroll-engines`.
 - [x] Statutory rule versions are unique per (rule type, country, state) so multi-country rules coexist.
 - [x] Filing submissions (UK RTI/FPS, German DEUV): engine-generated payloads via `POST /api/v1/payroll-filings/submit`; real HMRC/Finanzamt live submission is still pending (P60/P45 are employee-facing documents).
