@@ -104,7 +104,7 @@ Legend: **Done** = end-to-end + tests · **Partial** = core exists, material gap
 | Leave & holidays | **Partial** | Accrual + approvals; holidays are org-wide, not per location/legal entity |
 | Payroll processing | **Partial** | India-oriented runs; no off-cycle, loans/advances, reimbursements, garnishments, multi-currency FX |
 | Statutory compliance & filings | **Partial → Missing** | Rules stored, but no returns, challans, Form 16/W-2, or e-filing exports |
-| Benefits administration | **Partial** | Plan catalog + enrollment; no carrier feed, eligibility rules, or payroll deduction linkage |
+| Benefits administration | **Partial → Strong** | Country-aware plan catalog, tiers, dependants, eligibility rules, premiums, and payroll deduction linkage; carrier feeds/COBRA/ACA still missing |
 | Compensation review cycle | **Partial** | Compensation history/components; no cycle budget, merit matrix, or approval workflow |
 | Performance management | **Done** | Cycles, goals, check-ins, 360 feedback, calibration |
 | Learning & development | **Missing** | Development goals exist; no courses, assignments, or certifications |
@@ -174,9 +174,24 @@ slabs, wage bases, annualization, exemption caps, or employer/employee splits pe
 
 ### Europe (country-by-country, not one regime)
 
-**Status: not implemented.** `TaxRegime.UK_PAYE` is only an enum value; there is no EU model.
+**Status: reference country pack implemented; statutory engines not yet implemented.**
+`TaxRegime.UK_PAYE` remains an enum value only. `peawork/localization.py` now
+registers 12 European payroll markets (GB, DE, FR, IT, ES, NL, CH, PL, SE, BE,
+IE, AT) with currency, timezone, languages, tax-year start, pay frequencies,
+statutory leave, social schemes, filing names, and benefits notes. The catalogue
+is exposed at `GET /api/v1/metadata/countries` and `GET /api/v1/metadata/countries/{code}`.
 
-Europe cannot be served by one calculator. Minimum architecture:
+**Implemented groundwork**
+
+- `CountryProfile` / `StatutoryScheme` registry with a stable payload contract
+- `reference_statutory_items()` for demos and payroll previews — explicitly marked `reference_only`
+- `Employee.country_code` so country-scoped benefit eligibility can be enforced
+- Country-aware benefit plans (market, currency default, coverage tier, waiting period, eligibility JSON)
+- UI catalogue at `/admin/benefits` and API metadata for benefit types, tiers, and dependant relationships
+
+Reference rates in the pack are **planning defaults only**; configured
+`StatutoryRuleVersion` rows must win in production. Europe still cannot be served
+by one calculator. Remaining architecture:
 
 - Per-country payroll engine selected by `LegalEntity.country_code`
 - Country-specific statutory rule schemas (JSON) validated per engine
@@ -201,6 +216,30 @@ Cross-cutting EU requirements:
 - Payslip and record-retention rules differ by country
 - Multi-currency payroll and FX revaluation; local bank formats (SEPA, BACS, etc.)
 - EU/UK data residency and cross-border transfer controls
+
+### Global benefits and health insurance
+
+**Status: implemented foundation.** The benefits layer now covers global
+healthcare, life, disability, accident, travel, wellness and retirement plans.
+
+**Implemented**
+
+- `BenefitPlan`: country/global scope, provider and policy number, coverage tier, currency, employer/employee contributions, payroll-deduction flag, waiting period, eligibility JSON, free-form metadata
+- `EmployeeBenefit`: effective dates, coverage tier, coverage amount, employee/employer premiums, currency, payroll-deduction flag, status
+- `BenefitDependent`: spouse/partner/child/parent/other with date of birth and masked national ID
+- Eligibility checks: plan country scope, employment type, minimum service, and waiting period
+- Payroll linkage: active employee premiums become `Benefit: <plan>` deduction lines; employer premiums become employer-contribution lines; enrollment effective/end dates are honoured
+- API: `GET/POST/PUT /benefit-plans`, `GET /benefits`, `POST /benefits/enroll`, `POST /benefits/{id}/dependents`, plus country/benefit metadata
+- Web: `/admin/benefits` catalogue and enrollment form for HR/admin
+
+**Still needed**
+
+- Carrier/provider integrations (EDI 834, reconciliation, eligibility files)
+- Enrollment windows, qualifying life events, evidence of insurability
+- Country-specific statutory health interactions (e.g. German KV, UK PMI benefit-in-kind)
+- Pre-tax vs post-tax treatment and taxable-benefit reporting by jurisdiction
+- COBRA/ACA (US), pension auto-enrolment (UK), and works-council consultation records
+- Multi-currency FX and validation against the payroll run currency
 
 ### Recommended localization architecture
 
@@ -230,19 +269,20 @@ Cross-cutting EU requirements:
 
 1. Recruitment/ATS: requisition → candidate → interview → offer → convert to employee.
 2. Expenses and reimbursements, loans/advances, and payroll deduction linkage.
-3. Asset assignment and offboarding recovery.
-4. Learning: courses, assignments, certifications, compliance training.
-5. Configurable approval workflow + delegation + SLA escalation.
-6. DSAR/consent/retention toolkit (GDPR + India DPDP Act).
-7. Statutory outputs: India Form 16/24Q/PF ECR/ESI; UK RTI; US W-2/941.
-8. Real ops: shared-state HA, scheduled backup worker, restore drills, alerting.
+3. Benefits operations: enrollment windows, life events, carrier exports and reconciliation.
+4. Asset assignment and offboarding recovery.
+5. Learning: courses, assignments, certifications, compliance training.
+6. Configurable approval workflow + delegation + SLA escalation.
+7. DSAR/consent/retention toolkit (GDPR + India DPDP Act).
+8. Statutory outputs: India Form 16/24Q/PF ECR/ESI; UK RTI; US W-2/941.
+9. Real ops: shared-state HA, scheduled backup worker, restore drills, alerting.
 
 ### P2 — scale and differentiation (quarter+)
 
 1. Compensation review cycles with budgets and merit matrices.
 2. Engagement surveys and employee-relations case management.
 3. Analytics warehouse, dashboards, scheduled reports.
-4. US state-by-state payroll and EU country engines (start with UK + Germany).
+4. `PayrollCountryEngine` implementations for UK and Germany on top of the new country pack, then US state-by-state payroll.
 5. Billing provider integration (Stripe/Paddle) with webhooks and entitlement enforcement.
 6. Health & safety / incident management.
 
@@ -269,13 +309,14 @@ which is a stronger differentiator than adding more shallow modules.
 
 | Metric | Value |
 |---|---|
-| Mapped database tables | 49 |
-| Alembic migrations | 16 (single head `7663d9f4f9c0`) |
-| REST API routes (`/api/v1`) | 130 |
-| Web routes | 85 |
+| Mapped database tables | 51 |
+| Alembic migrations | 17 (single head `c9d8e7f6a5b4`) |
+| REST API routes (`/api/v1`) | 138 |
+| Web routes | 99 |
 | Service modules | 21 |
-| Tests | 381 passing across 16 files |
+| Tests | 386 passing across 17 files |
 | Supported UI locales | en, hi |
+| Country packs | 14 profiles (12 Europe + India + US) |
 | Payroll statutory rule types | PF, ESI, PT, TDS |
 | Tax regimes declared | India old/new, US federal, UK PAYE, generic |
 | Tax regimes implemented | India flat-rule only |

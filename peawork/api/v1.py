@@ -65,7 +65,7 @@ from ..services.employees import (
     list_employees,
     update_employee,
 )
-from ..services.errors import ConflictError, ValidationError
+from ..services.errors import ConflictError, NotFoundError, ValidationError
 from ..services.leave import (
     balances_for,
     cancel_leave,
@@ -861,19 +861,7 @@ def api_benefit_plans(
     user: User = Depends(require_user(Role.ADMIN, Role.HR)),
 ):
     plans = payroll_service.list_benefit_plans(db, user.org_id)
-    return [
-        {
-            "id": str(p.id),
-            "name": p.name,
-            "code": p.code,
-            "benefit_type": p.benefit_type.value,
-            "provider": p.provider,
-            "employer_contribution": float(p.employer_contribution),
-            "employee_contribution": float(p.employee_contribution),
-            "active": p.active,
-        }
-        for p in plans
-    ]
+    return [payroll_service.benefit_plan_payload(p) for p in plans]
 
 
 @router.post("/benefit-plans", status_code=201)
@@ -884,10 +872,57 @@ def api_benefit_plan_create(
     user: User = Depends(require_user(Role.ADMIN, Role.HR)),
 ):
     plan = payroll_service.create_benefit_plan(db, org_id=user.org_id, actor=user, data=payload)
-    return {"id": str(plan.id), "detail": "Benefit plan created"}
+    return {
+        "id": str(plan.id),
+        "plan": payroll_service.benefit_plan_payload(plan),
+        "detail": "Benefit plan created",
+    }
+
+
+@router.put("/benefit-plans/{plan_id}", status_code=200)
+def api_benefit_plan_update(
+    plan_id: UUID,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    plan = payroll_service.update_benefit_plan(
+        db, org_id=user.org_id, actor=user, plan_id=plan_id, data=payload
+    )
+    return {
+        "id": str(plan.id),
+        "plan": payroll_service.benefit_plan_payload(plan),
+        "detail": "Benefit plan updated",
+    }
 
 
 # --- Employee Benefits ---
+@router.get("/benefits", response_model=list[dict])
+def api_benefits(
+    employee_id: UUID | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    enrollments = payroll_service.list_employee_benefits(
+        db, user.org_id, employee_id=employee_id
+    )
+    return [payroll_service.employee_benefit_payload(e) for e in enrollments]
+
+
+@router.get("/benefits/me", response_model=list[dict])
+def api_my_benefits(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user()),
+):
+    if not user.employee_id:
+        return []
+    enrollments = payroll_service.list_employee_benefits(
+        db, user.org_id, employee_id=user.employee_id
+    )
+    return [payroll_service.employee_benefit_payload(e) for e in enrollments]
+
+
 @router.post("/benefits/enroll", status_code=201)
 def api_benefit_enroll(
     payload: dict,
@@ -898,7 +933,68 @@ def api_benefit_enroll(
     enrollment = payroll_service.enroll_employee_in_benefit(
         db, org_id=user.org_id, actor=user, data=payload
     )
-    return {"id": str(enrollment.id), "detail": "Employee enrolled in benefit"}
+    return {
+        "id": str(enrollment.id),
+        "enrollment": payroll_service.employee_benefit_payload(enrollment),
+        "detail": "Employee enrolled in benefit",
+    }
+
+
+@router.post("/benefits/{enrollment_id}/dependents", status_code=201)
+def api_benefit_dependent_create(
+    enrollment_id: UUID,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    dependent = payroll_service.add_benefit_dependent(
+        db,
+        org_id=user.org_id,
+        actor=user,
+        enrollment_id=enrollment_id,
+        data=payload,
+    )
+    return {
+        "id": str(dependent.id),
+        "dependent": payroll_service.dependent_payload(dependent),
+        "detail": "Dependant added",
+    }
+
+
+# --- Country and benefit metadata ---
+@router.get("/metadata/countries", response_model=list[dict])
+def api_countries(
+    region: str | None = Query(None),
+    user: User = Depends(require_user()),
+):
+    from ..localization import country_payload, list_country_profiles
+
+    return [country_payload(p) for p in list_country_profiles(region=region)]
+
+
+@router.get("/metadata/countries/{code}", response_model=dict)
+def api_country(
+    code: str,
+    user: User = Depends(require_user()),
+):
+    from ..localization import country_payload, get_country_profile
+
+    profile = get_country_profile(code)
+    if profile is None:
+        raise NotFoundError(f"Unsupported country code: {code}")
+    return country_payload(profile)
+
+
+@router.get("/metadata/benefit-catalog", response_model=dict)
+def api_benefit_catalog(user: User = Depends(require_user())):
+    from ..domain import BenefitCoverageTier, BenefitType, DependentRelationship
+
+    return {
+        "benefit_types": [item.value for item in BenefitType],
+        "coverage_tiers": [item.value for item in BenefitCoverageTier],
+        "dependent_relationships": [item.value for item in DependentRelationship],
+    }
 
 
 # --- Legal Entities ---

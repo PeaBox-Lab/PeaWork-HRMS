@@ -187,6 +187,33 @@ We are not bolting a hardened product onto the prototype. We are doing a **contr
 
 ---
 
+### Phase 3 — Global benefits & European country pack (v2.4)
+
+**Goal:** a reusable country metadata pack for the largest European payroll markets,
+plus a country-aware healthcare/insurance benefits layer that feeds payroll.
+
+> **Status:** ✅ Foundation complete (2026-11-19) — migration
+> `c9d8e7f6a5b4_global_benefits_and_country_packs.py` (down_revision
+> `7663d9f4f9c0`) upgrades and downgrades cleanly on SQLite; `tests/v2` suite green.
+
+- [x] `peawork/localization.py`: 14 country profiles (12 Europe + India + US) with currency, timezone, languages, tax-year start, pay frequencies, statutory leave, social schemes, filings and benefits notes.
+- [x] Reference statutory items marked `reference_only`; configured `StatutoryRuleVersion` remains authoritative.
+- [x] `Employee.country_code` for country-scoped eligibility.
+- [x] Benefit plans: country/global scope, carrier, policy number, coverage tier, currency, contributions, payroll flag, waiting period, eligibility JSON, metadata.
+- [x] Enrollments: effective dates, premiums, currency, coverage tier, dependants (spouse/partner/child/parent/other).
+- [x] Eligibility: country scope, employment type, minimum service, waiting period.
+- [x] Payroll: active employee premiums become deduction lines; employer premiums become employer-contribution lines; effective/end dates honoured.
+- [x] API: country/benefit metadata, plan CRUD, enrollment list/create, dependant create.
+- [x] Web: `/admin/benefits` catalogue and enrollment form.
+- [ ] `PayrollCountryEngine` implementations (UK and Germany first) with progressive slabs and filing outputs.
+- [ ] Carrier integrations, enrollment windows, life events, and country-specific taxable-benefit reporting.
+
+**Exit:** HR can publish global and country-specific benefit plans, enroll families,
+and see premiums on payslips; the country pack is the stable input for per-country
+payroll engines.
+
+---
+
 ## R2 — Time & attendance (v2.1)
 
 > **Status:** ✅ Completed (2026-11-18) — all R2 scope items implemented: migration `03187f6bc661_time_attendance_r2.py` (down_revision `ec80ab59c493`), `alembic check` clean, `tests/v2` 281 passed (29 new), coverage 82.0%, `smoke_time.py` green on `http://127.0.0.1:8090`. Notes: the job queue is a DB-backed implementation (Redis/Dramatiq was intentionally avoided to keep deployment self-hosted and infra-light); exactly-once leave accrual is enforced by a unique `leave_accrual_runs` marker per (org, period, leave type); biometric punches arrive via `POST /api/v1/devices/punches` (HMAC-SHA256, constant-time compare, no session — outside the CSRF-guarded router by design). Payroll-side consumption of the reconciled attendance period (payable-day sync / freeze hooks) lands with the next payroll phase.

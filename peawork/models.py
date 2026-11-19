@@ -35,6 +35,8 @@ from .domain import (
     BenefitType,
     ChangeRequestType,
     ChangeRequestStatus,
+    DependentRelationship,
+    BenefitCoverageTier,
     DocumentCategory,
     EmployeeStatus,
     EmploymentType,
@@ -262,6 +264,7 @@ class Employee(TimestampMixin, Base):
     position_id: Mapped[UUID | None] = mapped_column(ForeignKey("positions.id", ondelete="SET NULL"))
     manager_id: Mapped[UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
     location: Mapped[str | None] = mapped_column(String(120), default="Gurugram")
+    country_code: Mapped[str | None] = mapped_column(String(2))
     pan_masked: Mapped[str | None] = mapped_column(String(32))
     bank_masked: Mapped[str | None] = mapped_column(String(32))
     is_sample: Mapped[bool] = mapped_column(
@@ -1063,12 +1066,13 @@ class BankAccount(TimestampMixin, Base):
 
 
 class BenefitPlan(TimestampMixin, Base):
-    """Org-level benefit plan catalog."""
+    """Org-level benefit plan catalog (global or country-specific)."""
 
     __tablename__ = "benefit_plans"
     __table_args__ = (
         UniqueConstraint("org_id", "code", name="uq_benefit_plans_org_code"),
         Index("ix_benefit_plans_org_type", "org_id", "benefit_type"),
+        Index("ix_benefit_plans_org_country", "org_id", "country_code"),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -1080,13 +1084,29 @@ class BenefitPlan(TimestampMixin, Base):
     benefit_type: Mapped[BenefitType] = mapped_column(
         enum_col(BenefitType), nullable=False
     )
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(120))
+    policy_number: Mapped[str | None] = mapped_column(String(64))
+    coverage_tier: Mapped[BenefitCoverageTier] = mapped_column(
+        enum_col(BenefitCoverageTier),
+        default=BenefitCoverageTier.EMPLOYEE_ONLY,
+        nullable=False,
+    )
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
     employer_contribution: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), default=Decimal("0"), nullable=False
     )
     employee_contribution: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), default=Decimal("0"), nullable=False
     )
+    payroll_deduction: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    waiting_period_days: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    eligibility: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -1097,6 +1117,7 @@ class EmployeeBenefit(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("employee_id", "plan_id", name="uq_emp_benefits_employee_plan"),
         Index("ix_employee_benefits_org_status", "org_id", "status"),
+        Index("ix_employee_benefits_org_employee", "org_id", "employee_id"),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -1110,11 +1131,58 @@ class EmployeeBenefit(TimestampMixin, Base):
         ForeignKey("benefit_plans.id", ondelete="CASCADE"), nullable=False, index=True
     )
     enrolled_on: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_on: Mapped[date | None] = mapped_column(Date)
+    coverage_tier: Mapped[BenefitCoverageTier] = mapped_column(
+        enum_col(BenefitCoverageTier),
+        default=BenefitCoverageTier.EMPLOYEE_ONLY,
+        nullable=False,
+    )
     coverage_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    employee_premium: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
+    employer_premium: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0"), nullable=False
+    )
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    payroll_deduction: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
     status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
     ends_on: Mapped[date | None] = mapped_column(Date)
 
     plan: Mapped[BenefitPlan] = relationship(lazy="selectin")
+    dependents: Mapped[list["BenefitDependent"]] = relationship(
+        back_populates="enrollment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
+
+class BenefitDependent(TimestampMixin, Base):
+    """A family member covered by an employee's benefit enrollment."""
+
+    __tablename__ = "benefit_dependents"
+    __table_args__ = ()
+
+    id: Mapped[UUID] = uuid_pk()
+    org_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    enrollment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("employee_benefits.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    full_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    relationship_type: Mapped[DependentRelationship] = mapped_column(
+        "relationship", enum_col(DependentRelationship), nullable=False
+    )
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
+    national_id_masked: Mapped[str | None] = mapped_column(String(32))
+
+    enrollment: Mapped[EmployeeBenefit] = relationship(back_populates="dependents")
 
 
 class LegalEntity(TimestampMixin, Base):

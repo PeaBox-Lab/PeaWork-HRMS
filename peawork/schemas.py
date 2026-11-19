@@ -129,6 +129,7 @@ class EmployeeBase(BaseModel):
     position_id: UUID | None = None
     manager_id: UUID | None = None
     location: str | None = Field(default="Gurugram", max_length=120)
+    country_code: str | None = Field(default=None, max_length=2)
     pan_masked: str | None = Field(default=None, max_length=32)
     bank_masked: str | None = Field(default=None, max_length=32)
 
@@ -136,6 +137,11 @@ class EmployeeBase(BaseModel):
     @classmethod
     def lower_email(cls, value: EmailStr | None) -> str | None:
         return str(value).lower() if value else None
+
+    @field_validator("country_code")
+    @classmethod
+    def upper_country(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
 
 
 class EmployeeCreate(EmployeeBase):
@@ -157,8 +163,14 @@ class EmployeeUpdate(BaseModel):
     position_id: UUID | None = None
     manager_id: UUID | None = None
     location: str | None = Field(default=None, max_length=120)
+    country_code: str | None = Field(default=None, max_length=2)
     pan_masked: str | None = Field(default=None, max_length=32)
     bank_masked: str | None = Field(default=None, max_length=32)
+
+    @field_validator("country_code")
+    @classmethod
+    def upper_country(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
 
 
 class EmployeeBrief(ORMModel):
@@ -183,6 +195,7 @@ class EmployeeOut(ORMModel):
     employment_type: EmploymentType
     status: EmployeeStatus
     location: str | None
+    country_code: str | None = None
     department: DepartmentOut | None = None
     position: PositionOut | None = None
     manager: EmployeeBrief | None = None
@@ -380,21 +393,44 @@ class BenefitPlanOut(ORMModel):
     name: str
     code: str
     benefit_type: str
+    country_code: str | None = None
     provider: str | None
+    policy_number: str | None = None
+    coverage_tier: str = "employee_only"
+    currency: str = "INR"
     employer_contribution: Decimal
     employee_contribution: Decimal
+    payroll_deduction: bool = True
+    waiting_period_days: int = 0
+    eligibility: dict | None = None
+    metadata_json: dict | None = None
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class BenefitDependentOut(ORMModel):
+    id: UUID
+    full_name: str
+    relationship_type: str
+    date_of_birth: date | None = None
+    national_id_masked: str | None = None
 
 
 class EmployeeBenefitOut(ORMModel):
     id: UUID
     plan: BenefitPlanOut
     enrolled_on: date
+    effective_on: date | None = None
+    coverage_tier: str = "employee_only"
     coverage_amount: Decimal | None
+    employee_premium: Decimal = Decimal("0")
+    employer_premium: Decimal = Decimal("0")
+    currency: str = "INR"
+    payroll_deduction: bool = True
     status: str
     ends_on: date | None
+    dependents: list[BenefitDependentOut] = []
     created_at: datetime
     updated_at: datetime
 

@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import csrf_guard, require_user
-from ..domain import AuditAction, Role
+from ..domain import AuditAction, BenefitCoverageTier, BenefitType, Role
+from ..localization import list_country_profiles
 from ..models import AuditEvent, Department, Employee, Organization, Position, User
 from ..schemas import UserCreate
 from ..security import generate_password, hash_password, password_problems
 from ..services import audit
+from ..services import payroll as payroll_service
 from ..services.auth import revoke_all_sessions
 from ..services.bulk_import import (
     RowError,
@@ -27,7 +29,7 @@ from ..services.errors import BulkImportError, ConflictError, ValidationError
 from ..services.reports import employees_workbook, full_workbook
 from ..services.sample_data import clean_sample, sample_employee_count, seed_sample
 from ..templating import render
-from .forms import parse_uuid, validation_message
+from .forms import parse_date, parse_decimal, parse_uuid, text, validation_message
 
 router = APIRouter(dependencies=[Depends(csrf_guard)])
 
@@ -555,6 +557,158 @@ def admin_report_full(
         request=request,
     )
     return _xlsx_response(content, "peawork-full-report.xlsx")
+
+
+@router.get("/admin/benefits")
+def admin_benefits(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    return _render_benefits(request, db, user)
+
+
+@router.post("/admin/benefits")
+def admin_benefit_create(
+    request: Request,
+    name: str = Form(""),
+    code: str = Form(""),
+    benefit_type: str = Form("health_insurance"),
+    country_code: str = Form(""),
+    provider: str = Form(""),
+    policy_number: str = Form(""),
+    coverage_tier: str = Form("employee_only"),
+    currency: str = Form(""),
+    employer_contribution: str = Form("0"),
+    employee_contribution: str = Form("0"),
+    payroll_deduction: str = Form(""),
+    waiting_period_days: str = Form("0"),
+    active: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    values = {
+        "name": name,
+        "code": code,
+        "benefit_type": benefit_type,
+        "country_code": country_code,
+        "provider": provider,
+        "policy_number": policy_number,
+        "coverage_tier": coverage_tier,
+        "currency": currency,
+        "employer_contribution": employer_contribution,
+        "employee_contribution": employee_contribution,
+        "waiting_period_days": waiting_period_days,
+    }
+    try:
+        data = {
+            **values,
+            "name": text(name),
+            "code": text(code),
+            "country_code": text(country_code),
+            "provider": text(provider),
+            "policy_number": text(policy_number),
+            "currency": text(currency),
+            "employer_contribution": parse_decimal(employer_contribution) or 0,
+            "employee_contribution": parse_decimal(employee_contribution) or 0,
+            "payroll_deduction": payroll_deduction == "1",
+            "waiting_period_days": int(waiting_period_days or 0),
+            "active": active == "1",
+        }
+        payroll_service.create_benefit_plan(
+            db, org_id=user.org_id, actor=user, data=data
+        )
+    except (ValueError, ValidationError, ConflictError) as exc:
+        return _render_benefits(
+            request, db, user, status_code=422, form_error=str(exc), values=values
+        )
+    return RedirectResponse(url="/admin/benefits", status_code=303)
+
+
+@router.post("/admin/benefits/enroll")
+def admin_benefit_enroll(
+    request: Request,
+    employee_id: str = Form(""),
+    plan_id: str = Form(""),
+    coverage_tier: str = Form(""),
+    employee_premium: str = Form(""),
+    employer_premium: str = Form(""),
+    enrolled_on: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    try:
+        employee_uuid = parse_uuid(employee_id, "employee")
+        plan_uuid = parse_uuid(plan_id, "plan")
+        if employee_uuid is None or plan_uuid is None:
+            raise ValueError("Employee and plan are required")
+        data = {
+            "employee_id": str(employee_uuid),
+            "plan_id": str(plan_uuid),
+            "enrolled_on": parse_date(enrolled_on, "enrolled_on"),
+        }
+        if text(coverage_tier):
+            data["coverage_tier"] = coverage_tier
+        if text(employee_premium):
+            data["employee_premium"] = parse_decimal(
+                employee_premium, "employee premium"
+            )
+        if text(employer_premium):
+            data["employer_premium"] = parse_decimal(
+                employer_premium, "employer premium"
+            )
+        payroll_service.enroll_employee_in_benefit(
+            db, org_id=user.org_id, actor=user, data=data
+        )
+    except (ValueError, ValidationError, ConflictError) as exc:
+        return _render_benefits(
+            request, db, user, status_code=422, form_error=str(exc)
+        )
+    return RedirectResponse(url="/admin/benefits", status_code=303)
+
+
+def _render_benefits(
+    request: Request,
+    db: Session,
+    user: User,
+    *,
+    status_code: int = 200,
+    form_error: str | None = None,
+    values: dict | None = None,
+):
+    plans = payroll_service.list_benefit_plans(db, user.org_id)
+    enrollments = payroll_service.list_employee_benefits(db, user.org_id)
+    employees = db.scalars(
+        select(Employee)
+        .where(Employee.org_id == user.org_id)
+        .order_by(Employee.first_name, Employee.last_name)
+    ).all()
+    return render(
+        request,
+        "admin/benefits.html",
+        status_code=status_code,
+        form_error=form_error,
+        values=values or {},
+        plans=[payroll_service.benefit_plan_payload(plan) for plan in plans],
+        family_plans=sum(
+            1
+            for plan in plans
+            if plan.coverage_tier
+            in {
+                BenefitCoverageTier.FAMILY,
+                BenefitCoverageTier.EMPLOYEE_SPOUSE,
+                BenefitCoverageTier.EMPLOYEE_CHILDREN,
+            }
+        ),
+        enrollments=[
+            payroll_service.employee_benefit_payload(item) for item in enrollments
+        ],
+        employees=employees,
+        employee_names={str(item.id): item.full_name for item in employees},
+        countries=list_country_profiles(),
+        benefit_types=[item.value for item in BenefitType],
+        coverage_tiers=[item.value for item in BenefitCoverageTier],
+    )
 
 
 __all__ = ["router"]

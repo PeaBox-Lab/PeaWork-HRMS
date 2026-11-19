@@ -198,7 +198,13 @@ class TaxRegime(StrEnum):
 
 class BenefitType(StrEnum):
     HEALTH_INSURANCE = "health_insurance"
+    DENTAL = "dental"
+    VISION = "vision"
     LIFE_INSURANCE = "life_insurance"
+    DISABILITY = "disability"
+    CRITICAL_ILLNESS = "critical_illness"
+    ACCIDENT = "accident"
+    TRAVEL = "travel"
     RETIREMENT_PLAN = "retirement_plan"
     STOCK_OPTIONS = "stock_options"
     WELLNESS = "wellness"
@@ -206,6 +212,22 @@ class BenefitType(StrEnum):
     MEAL = "meal"
     CHILDCARE = "childcare"
     EDUCATION = "education"
+    OTHER = "other"
+
+
+class BenefitCoverageTier(StrEnum):
+    EMPLOYEE_ONLY = "employee_only"
+    EMPLOYEE_SPOUSE = "employee_spouse"
+    EMPLOYEE_CHILDREN = "employee_children"
+    FAMILY = "family"
+    CUSTOM = "custom"
+
+
+class DependentRelationship(StrEnum):
+    SPOUSE = "spouse"
+    PARTNER = "partner"
+    CHILD = "child"
+    PARENT = "parent"
     OTHER = "other"
 
 

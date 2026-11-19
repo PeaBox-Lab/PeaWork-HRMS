@@ -37,6 +37,7 @@ def upgrade() -> None:
     sa.Column('actor_id', sa.Uuid(), nullable=True),
     sa.Column('approved_by', sa.Uuid(), nullable=True),
     sa.Column('approved_at', sa.DateTime(timezone=True)),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['approved_by'], ['users.id'], name=op.f('fk_change_requests_approved_by_users'), ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['actor_id'], ['users.id'], name=op.f('fk_change_requests_actor_id_users'), ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['employee_id'], ['employees.id'], name=op.f('fk_change_requests_employee_id_employees'), ondelete='CASCADE'),

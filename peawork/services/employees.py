@@ -129,6 +129,7 @@ def create_employee(
         position_id=data.position_id,
         manager_id=data.manager_id,
         location=data.location,
+        country_code=data.country_code,
         pan_masked=data.pan_masked,
         bank_masked=data.bank_masked,
     )

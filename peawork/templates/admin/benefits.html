@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Benefits · PeaWork HRMS{% endblock %}
+{% block heading %}Benefits and insurance{% endblock %}
+{% block subheading %}Global plans, country fit and payroll deductions{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Benefits and insurance</h1>
+    <p>Build a global healthcare, insurance and retirement catalogue. Plans can be country-specific and employee premiums flow into payroll automatically.</p>
+  </div>
+  <div class="actions">
+    <a class="btn btn--ghost" href="/admin/settings">Settings</a>
+    <a class="btn btn--ghost" href="/admin/reports">Reports</a>
+  </div>
+</div>
+
+{% if form_error %}
+  <div class="alert alert--danger" role="alert"><span>{{ form_error }}</span></div>
+{% endif %}
+
+<div class="grid grid--4" style="margin-bottom: 1rem;">
+  <div class="card"><div class="stat"><span class="stat__label">Plans</span><span class="stat__value">{{ plans|length }}</span><span class="stat__hint">Across {{ countries|length }} country packs</span></div></div>
+  <div class="card"><div class="stat"><span class="stat__label">Enrollments</span><span class="stat__value">{{ enrollments|length }}</span><span class="stat__hint">Active and historical</span></div></div>
+  <div class="card"><div class="stat"><span class="stat__label">Payroll-linked</span><span class="stat__value">{{ plans|selectattr('payroll_deduction')|list|length }}</span><span class="stat__hint">Plans that deduct from pay</span></div></div>
+  <div class="card"><div class="stat"><span class="stat__label">Family plans</span><span class="stat__value">{{ family_plans }}</span><span class="stat__hint">Dependant coverage available</span></div></div>
+</div>
+
+<div class="grid grid--main">
+  <div class="card">
+    <div class="card__header"><h2>Create a plan</h2></div>
+    <form method="post" action="/admin/benefits">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="form-grid">
+        <div class="field">
+          <label for="name">Plan name</label>
+          <input id="name" name="name" type="text" required maxlength="120" value="{{ values.get('name', '') }}" placeholder="Global Medical — Gold">
+        </div>
+        <div class="field">
+          <label for="code">Code</label>
+          <input id="code" name="code" type="text" required maxlength="32" value="{{ values.get('code', '') }}" placeholder="MED-GOLD">
+        </div>
+        <div class="field">
+          <label for="benefit_type">Benefit type</label>
+          <select id="benefit_type" name="benefit_type">
+            {% for item in benefit_types %}
+              <option value="{{ item }}" {% if values.get('benefit_type') == item %}selected{% endif %}>{{ item|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="country_code">Country</label>
+          <select id="country_code" name="country_code">
+            <option value="">Global / all countries</option>
+            {% for country in countries %}
+              <option value="{{ country.code }}" {% if values.get('country_code') == country.code %}selected{% endif %}>{{ country.name }} ({{ country.code }})</option>
+            {% endfor %}
+          </select>
+          <span class="hint">Leave blank for a global plan. Country selection defaults the currency.</span>
+        </div>
+        <div class="field">
+          <label for="provider">Provider / carrier</label>
+          <input id="provider" name="provider" type="text" maxlength="120" value="{{ values.get('provider', '') }}" placeholder="AXA, Allianz, Cigna">
+        </div>
+        <div class="field">
+          <label for="policy_number">Policy number</label>
+          <input id="policy_number" name="policy_number" type="text" maxlength="64" value="{{ values.get('policy_number', '') }}">
+        </div>
+        <div class="field">
+          <label for="coverage_tier">Default coverage</label>
+          <select id="coverage_tier" name="coverage_tier">
+            {% for item in coverage_tiers %}
+              <option value="{{ item }}" {% if values.get('coverage_tier') == item %}selected{% endif %}>{{ item|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="currency">Currency</label>
+          <input id="currency" name="currency" type="text" maxlength="3" value="{{ values.get('currency', '') }}" placeholder="Auto">
+          <span class="hint">Optional ISO 4217 override.</span>
+        </div>
+        <div class="field">
+          <label for="employer_contribution">Employer contribution</label>
+          <input id="employer_contribution" name="employer_contribution" type="number" min="0" step="0.01" value="{{ values.get('employer_contribution', '0') }}">
+        </div>
+        <div class="field">
+          <label for="employee_contribution">Employee contribution</label>
+          <input id="employee_contribution" name="employee_contribution" type="number" min="0" step="0.01" value="{{ values.get('employee_contribution', '0') }}">
+          <span class="hint">Monthly employee premium used for payroll deductions.</span>
+        </div>
+        <div class="field">
+          <label for="waiting_period_days">Waiting period (days)</label>
+          <input id="waiting_period_days" name="waiting_period_days" type="number" min="0" step="1" value="{{ values.get('waiting_period_days', '0') }}">
+        </div>
+        <div class="field">
+          <label class="row small" style="gap: .5rem; margin-top: 1.6rem;">
+            <input type="checkbox" name="payroll_deduction" value="1" checked>
+            Deduct employee premium in payroll
+          </label>
+          <label class="row small" style="gap: .5rem;">
+            <input type="checkbox" name="active" value="1" checked>
+            Plan is active
+          </label>
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn" type="submit">Create plan</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card__header"><h2>Enroll an employee</h2></div>
+    <form method="post" action="/admin/benefits/enroll">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="form-grid">
+        <div class="field field--full">
+          <label for="employee_id">Employee</label>
+          <select id="employee_id" name="employee_id" required>
+            <option value="">Select employee</option>
+            {% for employee in employees %}
+              <option value="{{ employee.id }}">{{ employee.full_name }} · {{ employee.employee_no }}{% if employee.country_code %} · {{ employee.country_code }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field field--full">
+          <label for="plan_id">Plan</label>
+          <select id="plan_id" name="plan_id" required>
+            <option value="">Select plan</option>
+            {% for plan in plans %}
+              <option value="{{ plan.id }}">{{ plan.name }} · {{ plan.currency }} {{ '%.2f'|format(plan.employee_contribution) }}/month</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="coverage_tier_enroll">Coverage</label>
+          <select id="coverage_tier_enroll" name="coverage_tier">
+            <option value="">Use plan default</option>
+            {% for item in coverage_tiers %}
+              <option value="{{ item }}">{{ item|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="enrolled_on">Enrolled on</label>
+          <input id="enrolled_on" name="enrolled_on" type="date">
+        </div>
+        <div class="field">
+          <label for="employee_premium">Employee premium</label>
+          <input id="employee_premium" name="employee_premium" type="number" min="0" step="0.01" placeholder="Plan default">
+        </div>
+        <div class="field">
+          <label for="employer_premium">Employer premium</label>
+          <input id="employer_premium" name="employer_premium" type="number" min="0" step="0.01" placeholder="Plan default">
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn" type="submit">Enroll employee</button></div>
+    </form>
+
+    <div class="card__header" style="margin-top: 1.2rem;"><h3>Country packs</h3><span class="spacer"></span><span class="badge">{{ countries|length }}</span></div>
+    <p class="small muted">Payroll and statutory metadata is available for these markets through <span class="mono">/api/v1/metadata/countries</span>. Reference rates are planning defaults only.</p>
+    <div class="grid grid--2">
+      {% for country in countries %}
+        <div class="kv"><span>{{ country.name }}</span><strong>{{ country.currency }} · {{ country.code }}</strong></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+  <div class="card__header"><h2>Plan catalogue</h2><span class="spacer"></span><span class="badge">{{ plans|length }}</span></div>
+  {% if plans %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Plan</th><th>Type</th><th>Market</th><th>Coverage</th><th>Employee</th><th>Employer</th><th>Payroll</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for plan in plans %}
+          <tr>
+            <td><strong>{{ plan.name }}</strong><br><span class="small muted mono">{{ plan.code }}{% if plan.provider %} · {{ plan.provider }}{% endif %}</span></td>
+            <td><span class="badge">{{ plan.benefit_type|replace('_', ' ')|title }}</span></td>
+            <td>{{ plan.country_code or 'Global' }}</td>
+            <td>{{ plan.coverage_tier|replace('_', ' ')|title }}</td>
+            <td>{{ plan.currency }} {{ '%.2f'|format(plan.employee_contribution) }}</td>
+            <td>{{ plan.currency }} {{ '%.2f'|format(plan.employer_contribution) }}</td>
+            <td>{{ 'Yes' if plan.payroll_deduction else 'No' }}</td>
+            <td><span class="badge">{{ 'Active' if plan.active else 'Inactive' }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="small muted">No benefit plans yet. Create a health, life, disability or retirement plan to get started.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+  <div class="card__header"><h2>Employee enrollments</h2><span class="spacer"></span><span class="badge">{{ enrollments|length }}</span></div>
+  {% if enrollments %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Employee</th><th>Plan</th><th>Coverage</th><th>Employee premium</th><th>Dependants</th><th>Status</th><th>Effective</th></tr>
+      </thead>
+      <tbody>
+        {% for item in enrollments %}
+          <tr>
+            <td>{{ employee_names.get(item.employee_id, item.employee_id) }}</td>
+            <td>{{ item.plan.name if item.plan else item.plan_id }}</td>
+            <td>{{ item.coverage_tier|replace('_', ' ')|title }}</td>
+            <td>{{ item.currency }} {{ '%.2f'|format(item.employee_premium) }}</td>
+            <td>{{ item.dependents|length }}</td>
+            <td><span class="badge">{{ item.status|title }}</span></td>
+            <td>{{ item.effective_on or item.enrolled_on }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="small muted">No employee enrollments yet. Enroll an employee to link their premiums to payroll.</p>
+  {% endif %}
+</div>
+{% endblock %}

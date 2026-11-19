@@ -367,6 +367,79 @@ def test_payslip_employee_self_access(client, second_client):
         assert resp.status_code in (200, 403)  # Either allowed or denied based on policy
 
 
+def test_benefit_premium_is_deducted_in_payroll(client):
+    login_admin(client)
+    headers = api_headers(client)
+    employee_id = _first_employee_id()
+    _create_comp(client, headers, employee_id, base_salary=50000.0)
+
+    response = client.post(
+        "/api/v1/benefit-plans",
+        json={
+            "name": "Global Medical — Employee",
+            "code": "GLOBAL-MED",
+            "benefit_type": "health_insurance",
+            "provider": "Cigna",
+            "employer_contribution": 3000.0,
+            "employee_contribution": 1200.0,
+            "payroll_deduction": True,
+            "active": True,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    plan_id = response.json()["id"]
+
+    response = client.post(
+        "/api/v1/benefits/enroll",
+        json={
+            "employee_id": employee_id,
+            "plan_id": plan_id,
+            "enrolled_on": "2026-01-01",
+            "effective_on": "2026-01-01",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+
+    response = client.post(
+        "/api/v1/payroll-runs",
+        json={
+            "name": "Payroll - Benefits",
+            "period_start": "2026-11-01",
+            "period_end": "2026-11-30",
+            "pay_date": "2026-11-30",
+            "frequency": "monthly",
+            "currency": "INR",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    run_id = response.json()["id"]
+
+    response = client.post(f"/api/v1/payroll-runs/{run_id}/process", headers=headers)
+    assert response.status_code == 200, response.text
+
+    response = client.get(f"/api/v1/payroll-runs/{run_id}/payslips", headers=headers)
+    assert response.status_code == 200
+    payslip = next(
+        item for item in response.json() if item["employee_id"] == employee_id
+    )
+    assert float(payslip["gross_pay"]) - float(payslip["total_deductions"]) == float(
+        payslip["net_pay"]
+    )
+
+    response = client.get(f"/api/v1/payslips/{payslip['id']}", headers=headers)
+    assert response.status_code == 200
+    detail = response.json()
+    benefit_lines = [
+        line for line in detail["lines"] if line["component_name"].startswith("Benefit: ")
+    ]
+    assert benefit_lines
+    assert float(benefit_lines[0]["amount"]) == 1200.0
+    assert float(detail["total_deductions"]) >= 1200.0
+
+
 def test_statutory_rule_version_create_list_update_delete(client):
     login_admin(client)
     headers = api_headers(client)

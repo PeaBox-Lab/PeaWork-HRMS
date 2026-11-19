@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     BankAccount,
+    BenefitDependent,
     BenefitPlan,
     Compensation,
     CompensationComponent,
@@ -25,11 +27,15 @@ from ..models import (
 from ..security import utcnow
 from ..domain import (
     AuditAction,
+    BenefitCoverageTier,
+    BenefitType,
+    DependentRelationship,
     PayComponentType,
     PayrollFrequency,
     PayrollStatus,
     StatutoryRuleType,
 )
+from ..localization import get_country_profile, normalize_country
 from . import audit as audit_service
 from . import policy
 from .errors import ConflictError, NotFoundError, ValidationError
@@ -337,7 +343,7 @@ def list_payroll_runs(db: Session, org_id: UUID) -> list[PayrollRun]:
 
 
 def _compute_employee_payslip(
-    db: Session, org_id: UUID, employee_id: UUID
+    db: Session, org_id: UUID, employee_id: UUID, as_of: date | None = None
 ) -> tuple[Decimal, Decimal, list[dict]]:
     """Compute gross, deductions and line dicts for one employee (no persistence)."""
     comp = get_compensation(db, org_id=org_id, employee_id=employee_id)
@@ -383,6 +389,24 @@ def _compute_employee_payslip(
                 "amount": item["employer_amount"],
             })
 
+    # Employee benefit premiums (health insurance, life cover, etc.).
+    for item in benefit_deduction_items_for(db, org_id, employee_id, as_of):
+        if item["employee_amount"] > 0:
+            lines.append({
+                "component_id": None,
+                "component_name": item["name"],
+                "component_type": item["line_type"],
+                "amount": item["employee_amount"],
+            })
+            total_deductions += item["employee_amount"]
+        if item["employer_amount"] > 0:
+            lines.append({
+                "component_id": None,
+                "component_name": f"{item['name']} (employer)",
+                "component_type": PayComponentType.EMPLOYER_CONTRIBUTION,
+                "amount": item["employer_amount"],
+            })
+
     return gross, total_deductions, lines
 
 
@@ -406,7 +430,7 @@ def generate_payslips(
     payslips: list[Payslip] = []
     for employee_id in employee_ids:
         gross, total_deductions, line_dicts = _compute_employee_payslip(
-            db, org_id, employee_id
+            db, org_id, employee_id, as_of=run.period_end
         )
         if not line_dicts:
             # Skip employees without any payable lines
@@ -474,7 +498,9 @@ def preview_payroll_run(
     total_gross = Decimal("0")
     total_deductions = Decimal("0")
     for employee_id in employee_ids:
-        gross, deductions, line_dicts = _compute_employee_payslip(db, org_id, employee_id)
+        gross, deductions, line_dicts = _compute_employee_payslip(
+            db, org_id, employee_id, as_of=run.period_end
+        )
         if not line_dicts:
             continue
         total_gross += gross
@@ -560,6 +586,184 @@ def create_bank_account(
     return account
 
 
+BENEFIT_PLAN_MUTABLE_FIELDS = {
+    "name",
+    "provider",
+    "policy_number",
+    "country_code",
+    "coverage_tier",
+    "currency",
+    "employer_contribution",
+    "employee_contribution",
+    "payroll_deduction",
+    "waiting_period_days",
+    "eligibility",
+    "metadata_json",
+    "active",
+}
+
+
+def _dec(value, default: str = "0") -> Decimal:
+    """Coerce an API/form value to a two-place Decimal."""
+    if value in (None, ""):
+        return Decimal(default)
+    return Decimal(str(value))
+
+
+def _benefit_type(value) -> BenefitType:
+    if isinstance(value, BenefitType):
+        return value
+    try:
+        return BenefitType(str(value))
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in BenefitType)
+        raise ValidationError(f"benefit_type must be one of: {allowed}") from exc
+
+
+def _coverage_tier(value) -> BenefitCoverageTier:
+    if isinstance(value, BenefitCoverageTier):
+        return value
+    try:
+        return BenefitCoverageTier(str(value))
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in BenefitCoverageTier)
+        raise ValidationError(f"coverage_tier must be one of: {allowed}") from exc
+
+
+def _dependent_relationship(value) -> DependentRelationship:
+    if isinstance(value, DependentRelationship):
+        return value
+    try:
+        return DependentRelationship(str(value))
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in DependentRelationship)
+        raise ValidationError(f"relationship must be one of: {allowed}") from exc
+
+
+def _optional_country_code(value) -> str | None:
+    if value in (None, ""):
+        return None
+    code = normalize_country(value)
+    if get_country_profile(code) is None:
+        raise ValidationError(f"Unsupported country code: {code}")
+    return code
+
+
+def _benefit_currency(data: dict, country_code: str | None, fallback: str = "INR") -> str:
+    explicit = str(data.get("currency") or "").strip().upper()
+    if explicit:
+        if len(explicit) != 3:
+            raise ValidationError("currency must be a three-letter ISO 4217 code")
+        return explicit
+    profile = get_country_profile(country_code) if country_code else None
+    return profile.currency if profile else fallback
+
+
+def benefit_plan_payload(plan: BenefitPlan) -> dict:
+    """Serialize a benefit plan for API and web views."""
+    return {
+        "id": str(plan.id),
+        "name": plan.name,
+        "code": plan.code,
+        "benefit_type": plan.benefit_type.value,
+        "country_code": plan.country_code,
+        "provider": plan.provider,
+        "policy_number": plan.policy_number,
+        "coverage_tier": plan.coverage_tier.value,
+        "currency": plan.currency,
+        "employer_contribution": float(plan.employer_contribution),
+        "employee_contribution": float(plan.employee_contribution),
+        "payroll_deduction": plan.payroll_deduction,
+        "waiting_period_days": plan.waiting_period_days,
+        "eligibility": plan.eligibility or {},
+        "metadata": plan.metadata_json or {},
+        "active": plan.active,
+    }
+
+
+def dependent_payload(dependent: BenefitDependent) -> dict:
+    return {
+        "id": str(dependent.id),
+        "full_name": dependent.full_name,
+        "relationship": dependent.relationship_type.value,
+        "date_of_birth": dependent.date_of_birth.isoformat()
+        if dependent.date_of_birth
+        else None,
+        "national_id_masked": dependent.national_id_masked,
+    }
+
+
+def employee_benefit_payload(enrollment: EmployeeBenefit) -> dict:
+    """Serialize an enrollment, including plan and dependant summary."""
+    plan = enrollment.plan
+    return {
+        "id": str(enrollment.id),
+        "employee_id": str(enrollment.employee_id),
+        "plan_id": str(enrollment.plan_id),
+        "plan": benefit_plan_payload(plan) if plan else None,
+        "enrolled_on": enrollment.enrolled_on.isoformat(),
+        "effective_on": enrollment.effective_on.isoformat()
+        if enrollment.effective_on
+        else None,
+        "coverage_tier": enrollment.coverage_tier.value,
+        "coverage_amount": float(enrollment.coverage_amount)
+        if enrollment.coverage_amount is not None
+        else None,
+        "employee_premium": float(enrollment.employee_premium),
+        "employer_premium": float(enrollment.employer_premium),
+        "currency": enrollment.currency,
+        "payroll_deduction": enrollment.payroll_deduction,
+        "status": enrollment.status,
+        "ends_on": enrollment.ends_on.isoformat() if enrollment.ends_on else None,
+        "dependents": [dependent_payload(item) for item in enrollment.dependents],
+    }
+
+
+def benefit_eligibility_issues(
+    employee: Employee, plan: BenefitPlan, as_of: date
+) -> list[str]:
+    """Return human-readable reasons an employee cannot join a plan."""
+    eligibility = plan.eligibility or {}
+    issues: list[str] = []
+
+    allowed_countries = [
+        normalize_country(code)
+        for code in (eligibility.get("countries") or [])
+        if str(code).strip()
+    ]
+    if allowed_countries and employee.country_code:
+        if normalize_country(employee.country_code) not in allowed_countries:
+            issues.append(
+                f"employee country {normalize_country(employee.country_code)} is outside the plan's coverage"
+            )
+
+    allowed_types = {
+        str(item).strip() for item in (eligibility.get("employment_types") or []) if item
+    }
+    if allowed_types and employee.employment_type.value not in allowed_types:
+        issues.append(
+            f"employment type {employee.employment_type.value} is not eligible"
+        )
+
+    min_service = int(eligibility.get("min_service_days") or 0)
+    if min_service and employee.date_of_joining:
+        from datetime import timedelta
+
+        eligible_from = employee.date_of_joining + timedelta(days=min_service)
+        if as_of < eligible_from:
+            issues.append(f"minimum service of {min_service} days not met until {eligible_from.isoformat()}")
+
+    waiting = int(plan.waiting_period_days or 0)
+    if waiting and employee.date_of_joining:
+        from datetime import timedelta
+
+        eligible_from = employee.date_of_joining + timedelta(days=waiting)
+        if as_of < eligible_from:
+            issues.append(f"plan waiting period ends on {eligible_from.isoformat()}")
+
+    return issues
+
+
 def list_benefit_plans(db: Session, org_id: UUID) -> list[BenefitPlan]:
     """List benefit plans for an org."""
     return list(
@@ -574,27 +778,43 @@ def list_benefit_plans(db: Session, org_id: UUID) -> list[BenefitPlan]:
 def create_benefit_plan(
     db: Session, *, org_id: UUID, actor: User, data: dict
 ) -> BenefitPlan:
-    """Create a benefit plan (e.g., Health Insurance)."""
+    """Create a country-aware benefit plan (e.g. global health insurance)."""
     if actor.role.value not in {"admin", "hr"}:
         raise ValidationError("Only HR roles may create benefit plans")
+
+    code = str(data.get("code") or "").strip().upper()
+    name = str(data.get("name") or "").strip()
+    if not name or not code:
+        raise ValidationError("Benefit plan name and code are required")
 
     # Check duplicate code
     if db.scalar(
         select(BenefitPlan.id).where(
-            BenefitPlan.org_id == org_id, BenefitPlan.code == data["code"]
+            BenefitPlan.org_id == org_id, BenefitPlan.code == code
         )
     ):
-        raise ConflictError(f"Benefit plan code {data['code']} already exists")
+        raise ConflictError(f"Benefit plan code {code} already exists")
 
+    country_code = _optional_country_code(data.get("country_code"))
     plan = BenefitPlan(
         org_id=org_id,
-        name=data["name"].strip(),
-        code=data["code"].strip().upper(),
-        benefit_type=data["benefit_type"],
+        name=name,
+        code=code,
+        benefit_type=_benefit_type(data.get("benefit_type")),
+        country_code=country_code,
         provider=data.get("provider"),
-        employer_contribution=data.get("employer_contribution", Decimal("0")),
-        employee_contribution=data.get("employee_contribution", Decimal("0")),
-        active=data.get("active", True),
+        policy_number=data.get("policy_number"),
+        coverage_tier=_coverage_tier(
+            data.get("coverage_tier", BenefitCoverageTier.EMPLOYEE_ONLY)
+        ),
+        currency=_benefit_currency(data, country_code),
+        employer_contribution=_dec(data.get("employer_contribution")),
+        employee_contribution=_dec(data.get("employee_contribution")),
+        payroll_deduction=bool(data.get("payroll_deduction", True)),
+        waiting_period_days=int(data.get("waiting_period_days") or 0),
+        eligibility=data.get("eligibility") or None,
+        metadata_json=data.get("metadata_json") or None,
+        active=bool(data.get("active", True)),
     )
     db.add(plan)
     db.flush()
@@ -605,7 +825,58 @@ def create_benefit_plan(
         action=AuditAction.CREATE,
         entity_type="benefit_plan",
         entity_id=plan.id,
-        details=data,
+        details={key: value for key, value in data.items() if key in BENEFIT_PLAN_MUTABLE_FIELDS},
+        org_id=org_id,
+    )
+    return plan
+
+
+def update_benefit_plan(
+    db: Session, *, org_id: UUID, actor: User, plan_id: UUID, data: dict
+) -> BenefitPlan:
+    """Update a benefit plan's commercial and eligibility terms."""
+    if actor.role.value not in {"admin", "hr"}:
+        raise ValidationError("Only HR roles may update benefit plans")
+    plan = db.get(BenefitPlan, _as_uuid(plan_id))
+    if not plan or plan.org_id != org_id:
+        raise NotFoundError("Benefit plan not found")
+
+    if "name" in data:
+        plan.name = str(data["name"]).strip()
+    if "provider" in data:
+        plan.provider = data["provider"]
+    if "policy_number" in data:
+        plan.policy_number = data["policy_number"]
+    if "country_code" in data:
+        plan.country_code = _optional_country_code(data["country_code"])
+    if "coverage_tier" in data:
+        plan.coverage_tier = _coverage_tier(data["coverage_tier"])
+    if "currency" in data:
+        plan.currency = _benefit_currency(data, plan.country_code, plan.currency)
+    if "employer_contribution" in data:
+        plan.employer_contribution = _dec(data["employer_contribution"])
+    if "employee_contribution" in data:
+        plan.employee_contribution = _dec(data["employee_contribution"])
+    if "payroll_deduction" in data:
+        plan.payroll_deduction = bool(data["payroll_deduction"])
+    if "waiting_period_days" in data:
+        plan.waiting_period_days = int(data["waiting_period_days"] or 0)
+    if "eligibility" in data:
+        plan.eligibility = data["eligibility"] or None
+    if "metadata_json" in data:
+        plan.metadata_json = data["metadata_json"] or None
+    if "active" in data:
+        plan.active = bool(data["active"])
+
+    db.add(plan)
+    db.flush()
+    audit_service.record(
+        db,
+        actor=actor,
+        action=AuditAction.UPDATE,
+        entity_type="benefit_plan",
+        entity_id=plan.id,
+        details={key: value for key, value in data.items() if key in BENEFIT_PLAN_MUTABLE_FIELDS},
         org_id=org_id,
     )
     return plan
@@ -614,7 +885,7 @@ def create_benefit_plan(
 def enroll_employee_in_benefit(
     db: Session, *, org_id: UUID, actor: User, data: dict
 ) -> EmployeeBenefit:
-    """Enroll employee in a benefit plan."""
+    """Enroll an employee, applying country and service eligibility rules."""
     employee_id = _as_uuid(data["employee_id"])
     employee = db.get(Employee, employee_id)
     if not employee or employee.org_id != org_id:
@@ -624,6 +895,8 @@ def enroll_employee_in_benefit(
     plan = db.get(BenefitPlan, plan_id)
     if not plan or plan.org_id != org_id:
         raise NotFoundError("Benefit plan not found")
+    if not plan.active:
+        raise ValidationError("Benefit plan is not active")
 
     # Check if already enrolled
     existing = db.scalar(
@@ -635,17 +908,45 @@ def enroll_employee_in_benefit(
     if existing:
         raise ConflictError("Employee already enrolled in this benefit plan")
 
+    enrolled_on = _as_date(data.get("enrolled_on")) or utcnow().date()
+    effective_on = _as_date(data.get("effective_on")) or enrolled_on
+    issues = benefit_eligibility_issues(employee, plan, effective_on)
+    if issues:
+        raise ValidationError(
+            "Employee is not eligible for this benefit plan: " + "; ".join(issues)
+        )
+
+    coverage_tier = _coverage_tier(
+        data.get("coverage_tier", plan.coverage_tier)
+    )
     enrollment = EmployeeBenefit(
         org_id=org_id,
         employee_id=employee_id,
         plan_id=plan_id,
-        enrolled_on=_as_date(data.get("enrolled_on", utcnow().date())),
-        coverage_amount=data.get("coverage_amount"),
+        enrolled_on=enrolled_on,
+        effective_on=effective_on,
+        coverage_tier=coverage_tier,
+        coverage_amount=_dec(data["coverage_amount"])
+        if data.get("coverage_amount") not in (None, "")
+        else None,
+        employee_premium=_dec(
+            data.get("employee_premium", plan.employee_contribution)
+        ),
+        employer_premium=_dec(
+            data.get("employer_premium", plan.employer_contribution)
+        ),
+        currency=_benefit_currency(data, plan.country_code, plan.currency),
+        payroll_deduction=bool(
+            data.get("payroll_deduction", plan.payroll_deduction)
+        ),
         status=data.get("status", "active"),
         ends_on=_as_date(data.get("ends_on")) if data.get("ends_on") else None,
     )
     db.add(enrollment)
     db.flush()
+
+    for dependent in data.get("dependents") or []:
+        _add_dependent_row(db, org_id, enrollment, dependent)
 
     audit_service.record(
         db,
@@ -653,10 +954,118 @@ def enroll_employee_in_benefit(
         action=AuditAction.CREATE,
         entity_type="employee_benefit",
         entity_id=enrollment.id,
-        details=data,
+        details={
+            "employee_id": str(employee_id),
+            "plan_id": str(plan_id),
+            "coverage_tier": coverage_tier.value,
+            "currency": enrollment.currency,
+            "dependent_count": len(enrollment.dependents),
+        },
         org_id=org_id,
     )
     return enrollment
+
+
+def _add_dependent_row(
+    db: Session, org_id: UUID, enrollment: EmployeeBenefit, data: dict
+) -> BenefitDependent:
+    full_name = str(data.get("full_name") or "").strip()
+    if not full_name:
+        raise ValidationError("Dependent full_name is required")
+    dependent = BenefitDependent(
+        org_id=org_id,
+        enrollment_id=enrollment.id,
+        full_name=full_name,
+        relationship_type=_dependent_relationship(data.get("relationship")),
+        date_of_birth=_as_date(data.get("date_of_birth"))
+        if data.get("date_of_birth")
+        else None,
+        national_id_masked=data.get("national_id_masked"),
+    )
+    db.add(dependent)
+    db.flush()
+    return dependent
+
+
+def add_benefit_dependent(
+    db: Session, *, org_id: UUID, actor: User, enrollment_id: UUID, data: dict
+) -> BenefitDependent:
+    """Add a family member to an existing enrollment."""
+    enrollment = db.get(EmployeeBenefit, _as_uuid(enrollment_id))
+    if not enrollment or enrollment.org_id != org_id:
+        raise NotFoundError("Benefit enrollment not found")
+    if enrollment.coverage_tier == BenefitCoverageTier.EMPLOYEE_ONLY:
+        raise ValidationError(
+            "Change the coverage tier before adding dependants"
+        )
+    dependent = _add_dependent_row(db, org_id, enrollment, data)
+    audit_service.record(
+        db,
+        actor=actor,
+        action=AuditAction.CREATE,
+        entity_type="benefit_dependent",
+        entity_id=dependent.id,
+        details={
+            "enrollment_id": str(enrollment.id),
+            "relationship": dependent.relationship_type.value,
+        },
+        org_id=org_id,
+    )
+    return dependent
+
+
+def list_employee_benefits(
+    db: Session, org_id: UUID, *, employee_id: UUID | None = None
+) -> list[EmployeeBenefit]:
+    """List benefit enrollments, optionally for one employee."""
+    stmt = select(EmployeeBenefit).where(EmployeeBenefit.org_id == org_id)
+    if employee_id:
+        stmt = stmt.where(EmployeeBenefit.employee_id == _as_uuid(employee_id))
+    stmt = stmt.order_by(EmployeeBenefit.enrolled_on.desc(), EmployeeBenefit.id)
+    return list(db.scalars(stmt).all())
+
+
+def benefit_deduction_items_for(
+    db: Session, org_id: UUID, employee_id: UUID, as_of: date | None = None
+) -> list[dict]:
+    """Build payroll lines for active, employee-paid benefit enrollments."""
+    as_of = as_of or utcnow().date()
+    enrollments = db.scalars(
+        select(EmployeeBenefit).where(
+            EmployeeBenefit.org_id == org_id,
+            EmployeeBenefit.employee_id == employee_id,
+            EmployeeBenefit.status == "active",
+            EmployeeBenefit.payroll_deduction.is_(True),
+        )
+    ).all()
+
+    items: list[dict] = []
+    for enrollment in enrollments:
+        effective_on = enrollment.effective_on or enrollment.enrolled_on
+        if effective_on and effective_on > as_of:
+            continue
+        if enrollment.ends_on and enrollment.ends_on < as_of:
+            continue
+        plan_name = enrollment.plan.name if enrollment.plan else "Benefit"
+        if enrollment.employee_premium > 0:
+            items.append(
+                {
+                    "name": f"Benefit: {plan_name}",
+                    "employee_amount": enrollment.employee_premium,
+                    "employer_amount": enrollment.employer_premium,
+                    "line_type": PayComponentType.DEDUCTION,
+                }
+            )
+        elif enrollment.employer_premium > 0:
+            items.append(
+                {
+                    "name": f"Benefit: {plan_name}",
+                    "employee_amount": Decimal("0"),
+                    "employer_amount": enrollment.employer_premium,
+                    "line_type": PayComponentType.EMPLOYER_CONTRIBUTION,
+                }
+            )
+    return items
 
 
 def list_legal_entities(db: Session, org_id: UUID) -> list[LegalEntity]:
