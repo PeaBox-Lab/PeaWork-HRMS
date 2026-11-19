@@ -210,7 +210,7 @@ plus a country-aware healthcare/insurance benefits layer that feeds payroll.
 - [x] German engine: reference Lohnsteuer tariff with progression zones, solidarity surcharge free limit, and KV/PV/RV/AV branches with contribution ceilings.
 - [x] Reference rule templates for GB/DE exposed at `/api/v1/metadata/countries/{code}`; engines listed at `/api/v1/metadata/payroll-engines`.
 - [x] Statutory rule versions are unique per (rule type, country, state) so multi-country rules coexist.
-- [x] Filing descriptions (UK RTI/FPS, P60, P45; German DEUV) — real HMRC/Finanzamt submissions still pending.
+- [x] Filing submissions (UK RTI/FPS, German DEUV): engine-generated payloads via `POST /api/v1/payroll-filings/submit`; real HMRC/Finanzamt live submission is still pending (P60/P45 are employee-facing documents).
 - [ ] Real HMRC/Finanzamt submission flow and German tax classes II–VI, church tax.
 - [ ] Carrier integrations, enrollment windows, life events, and country-specific taxable-benefit reporting.
 

@@ -18,6 +18,7 @@ from peawork.payroll_engines import (
     get_payroll_engine,
     list_payroll_engines,
     progressive_tax,
+    submission_for_filing,
     tapered_allowance,
 )
 from peawork.services import payroll as payroll_service
@@ -187,6 +188,59 @@ def test_germany_duevent_filing():
     )
     assert [doc.doc_type for doc in docs] == ["DEUV"]
     assert docs[0].payload["social_insurance_contributions"] == result.employer_total
+
+
+def test_uk_filing_submissions():
+    result, filings = filings_for(
+        country_code="GB",
+        gross=Decimal("5000"),
+        as_of=date(2026, 11, 30),
+        rules=_rules("GB"),
+        employee_id="emp-gb",
+    )
+    submission = submission_for_filing(get_payroll_engine("GB"), filings[0])
+    assert submission.country_code == "GB"
+    assert submission.doc_type == "FPS"
+    assert submission.method == "POST"
+    assert "hmrc.gov.uk" in submission.url
+    assert "fullPaymentSubmissions" in submission.body
+
+    de_result, de_filings = filings_for(
+        country_code="DE",
+        gross=Decimal("5000"),
+        as_of=date(2026, 11, 30),
+        rules=_rules("DE"),
+        employee_id="emp-de",
+    )
+    de_submission = submission_for_filing(get_payroll_engine("DE"), de_filings[0])
+    assert de_submission.doc_type == "DEUV"
+    assert de_submission.method == "POST"
+    assert de_submission.body["social_insurance_contributions"] == de_result.employer_total
+
+
+def test_payroll_filing_submit_endpoint(client):
+    from tests.v2.helpers import api_headers, login_admin
+
+    login_admin(client)
+    headers = api_headers(client)
+    response = client.post(
+        "/api/v1/payroll-filings/submit",
+        headers=headers,
+        json={"country_code": "GB", "gross": "5000", "period_end": "2026-11-30"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["country_code"] == "GB"
+    assert payload["doc_type"] == "FPS"
+    assert payload["method"] == "POST"
+
+    germany = client.post(
+        "/api/v1/payroll-filings/submit",
+        headers=headers,
+        json={"country_code": "DE", "gross": "5000", "period_end": "2026-11-30"},
+    )
+    assert germany.status_code == 200, germany.text
+    assert germany.json()["doc_type"] == "DEUV"
 
 
 def test_missing_country_rules_produce_warnings():

@@ -218,6 +218,61 @@ def country_statutory_items(
     return items, result
 
 
+def filing_submission_for_country(
+    db: Session,
+    *,
+    org_id: UUID,
+    country: str,
+    gross: Decimal,
+    period_end: date,
+    employee_id: str | None = None,
+    currency: str = "EUR",
+    pay_frequency: str = "monthly",
+    doc_type: str | None = None,
+) -> dict:
+    """Build the legal filing for a country/period and return a submission view.
+
+    The payload is a *review* view: ``url`` is the target API endpoint for
+    countries that offer an automated submission (HMRC), ``method`` is ``PDF``
+    for employee-facing documents. Live submission is not performed here.
+    """
+    from ..localization import get_country_profile
+    from ..payroll_engines import filings_for, get_payroll_engine, submission_for_filing
+
+    profile = get_country_profile(country)
+    if profile is None:
+        raise ValidationError(f"Unsupported country code: {country}")
+
+    if not currency:
+        currency = profile.currency
+    rules = active_statutory_rules(db, org_id, profile.code, period_end)
+    result, filings = filings_for(
+        country_code=profile.code,
+        gross=gross,
+        as_of=period_end,
+        rules=rules,
+        currency=currency,
+        pay_frequency=pay_frequency,
+        employee_id=employee_id,
+    )
+    if doc_type:
+        filings = [filing for filing in filings if filing.doc_type == doc_type]
+    if not filings:
+        raise ValidationError("No filing generated for this period")
+
+    filing = filings[0]
+    submission = submission_for_filing(get_payroll_engine(profile.code), filing)
+    return {
+        "country_code": filing.country_code,
+        "doc_type": filing.doc_type,
+        "engine": result.engine,
+        "method": submission.method,
+        "url": submission.url,
+        "body": dict(submission.body),
+        "notes": submission.notes,
+    }
+
+
 def next_payroll_number(db: Session, org_id: UUID) -> str:
     """Generate a payroll run name, e.g., PAY-2024-09-001."""
     now = utcnow()

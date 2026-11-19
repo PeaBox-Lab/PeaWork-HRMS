@@ -994,6 +994,31 @@ def api_payroll_engines(user: User = Depends(require_user())):
     return list_payroll_engines()
 
 
+@router.post("/payroll-filings/submit", response_model=dict)
+def api_payroll_filing_submit(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user(Role.ADMIN, Role.HR)),
+):
+    """Build a jurisdiction's filing and return the submission payload."""
+    from decimal import Decimal
+
+    gross = Decimal(str(payload.get("gross") or "0"))
+    period_end = payroll_service._as_date(payload.get("period_end")) or date.today()
+    currency = str(payload.get("currency") or "").strip().upper()
+    return payroll_service.filing_submission_for_country(
+        db,
+        org_id=user.org_id,
+        country=(payload.get("country_code") or "").strip().upper(),
+        gross=gross,
+        period_end=period_end,
+        employee_id=payload.get("employee_id"),
+        currency=currency,
+        pay_frequency=str(payload.get("pay_frequency") or "monthly"),
+        doc_type=payload.get("doc_type"),
+    )
+
+
 @router.get("/metadata/benefit-catalog", response_model=dict)
 def api_benefit_catalog(user: User = Depends(require_user())):
     from ..domain import BenefitCoverageTier, BenefitType, DependentRelationship

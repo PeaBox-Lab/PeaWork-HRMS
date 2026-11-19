@@ -341,6 +341,39 @@ class PayrollCountryEngine(Protocol):
 
 
 @dataclass(frozen=True)
+class FilingSubmission:
+    """A prepared legal filing ready to send to the local tax authority.
+
+    ``method`` is "POST" for APIs and "PDF" for employee documents. ``url`` is
+    the target API endpoint (empty for PDF downloads). Live submission is
+    always a separate, reviewed step: the payloads here are skeletons that
+    still need the authority's account setup and possibly real signatures.
+    """
+
+    country_code: str
+    doc_type: str
+    method: str
+    url: str
+    body: Mapping[str, Any]
+    notes: str = ""
+
+
+def submission_for_filing(engine: PayrollCountryEngine, filing: FilingDocument) -> FilingSubmission:
+    """Ask the engine for a submission payload for a filing document."""
+    handler = getattr(engine, "submission", None)
+    if handler is None:
+        return FilingSubmission(
+            country_code=filing.country_code,
+            doc_type=filing.doc_type,
+            method="PDF",
+            url="",
+            body=filing.payload,
+            notes="Filing document; real submission not supported for this country yet.",
+        )
+    return handler(filing)
+
+
+@dataclass(frozen=True)
 class FilingDocument:
     """A country filing (FPS/P60/P45 for the UK, DEÜV for Germany).
 
@@ -642,6 +675,46 @@ class UnitedKingdomEngine:
             tax_code=tax_code,
         )
 
+    def submission(self, filing: FilingDocument) -> FilingSubmission:
+        if filing.doc_type == "FPS":
+            return FilingSubmission(
+                country_code="GB",
+                doc_type="FPS",
+                method="POST",
+                url="https://test-api.service.hmrc.gov.uk/forms/eps/1.0/submit/full-payment-submission",
+                body={
+                    "schemaVersion": 1,
+                    "epsVersion": 1.0,
+                    "fullPaymentSubmissions": [
+                        {"formType": "FPS", **filing.payload}
+                    ],
+                },
+                notes=(
+                    "HMRC EPS full-payment submission. Needs an HMRC API account and "
+                    "HMRC OAuth/digital signing; live submission is pending HMRC setup."
+                ),
+            )
+        if filing.doc_type in {"P45", "P60"}:
+            return FilingSubmission(
+                country_code="GB",
+                doc_type=filing.doc_type,
+                method="PDF",
+                url="",
+                body=dict(filing.payload),
+                notes=(
+                    "Export as PDF; P60s are employee documents, P45s for leavers "
+                    "are accepted by HMRC via the online services portal."
+                ),
+            )
+        return FilingSubmission(
+            country_code="GB",
+            doc_type=filing.doc_type,
+            method="PDF",
+            url="",
+            body=dict(filing.payload),
+            notes="No HMRC submission path for this filing type yet.",
+        )
+
     def capabilities(self) -> dict[str, Any]:
         return {
             "country_code": self.country_code,
@@ -650,7 +723,7 @@ class UnitedKingdomEngine:
             "implemented": True,
             "supported_rule_types": sorted(self.consumed_rule_types),
             "filings": ["FPS", "P60", "P45"],
-            "notes": "FPS via RTI, plus P60 and P45 descriptions. No real submission.",
+            "notes": "FPS submission payload via HMRC EPS; P60/P45 PDF descriptions; live HMRC submission pending.",
         }
 
 
@@ -757,6 +830,29 @@ class GermanyEngine:
             number_of_employees=1,
         )
 
+    def submission(self, filing: FilingDocument) -> FilingSubmission:
+        if filing.doc_type == "DEUV":
+            return FilingSubmission(
+                country_code="DE",
+                doc_type="DEUV",
+                method="POST",
+                url="https://www.g-icas.net/",
+                body=dict(filing.payload),
+                notes=(
+                    "DEÜV summary to the health funds via GZS1-style API; requires "
+                    "a provider account and PIN authentication. Live submission "
+                    "is pending provider setup; the payload is for review."
+                ),
+            )
+        return FilingSubmission(
+            country_code="DE",
+            doc_type=filing.doc_type,
+            method="PDF",
+            url="",
+            body=dict(filing.payload),
+            notes="No real submission path for this filing type yet.",
+        )
+
     def capabilities(self) -> dict[str, Any]:
         return {
             "country_code": self.country_code,
@@ -765,7 +861,7 @@ class GermanyEngine:
             "implemented": True,
             "supported_rule_types": sorted(self.consumed_rule_types),
             "filings": ["DEUV"],
-            "notes": "DEUV summary description only; tax classes II-VI, church tax and ELStAM not modelled.",
+            "notes": "DEUV submission payload via GZS1-style API; live submission pending provider setup; tax classes II-VI, church tax and ELStAM not modelled.",
         }
 
 
@@ -830,6 +926,7 @@ __all__ = [
     "PERIODS_PER_YEAR",
     "STATUTORY_LABELS",
     "FilingDocument",
+    "FilingSubmission",
     "GenericRuleEngine",
     "GermanyEngine",
     "PayrollContext",
@@ -840,8 +937,8 @@ __all__ = [
     "UnitedKingdomEngine",
     "banded_contribution",
     "compute_country_payroll",
-    "filings_for",
     "filing_documents",
+    "filings_for",
     "generic_items",
     "get_payroll_engine",
     "list_payroll_engines",
@@ -849,6 +946,7 @@ __all__ = [
     "periods_per_year",
     "progressive_tax",
     "shift_bands_to_taxable",
+    "submission_for_filing",
     "tapered_allowance",
     "tax_year_window",
 ]

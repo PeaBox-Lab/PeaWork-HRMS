@@ -211,7 +211,7 @@ and `GET /api/v1/metadata/countries/{code}`.
 Reference rates in the pack are **planning defaults only**; configured
 `StatutoryRuleVersion` rows must win in production. Remaining architecture:
 
-- Filing submissions: UK RTI/FPS, German ELStAM/DEÜV — filing *descriptions* exist (UK `FPS`/`P60`/`P45` via `payroll_engines`, German `DEÜV`); real submissions against HMRC/Finanzamt still pending
+- Filing submissions: UK RTI/FPS and German DEUV submission payloads are generated (`POST /api/v1/payroll-filings/submit`); live HMRC/Finanzamt submission is pending - no automated submission or account linkage exists
 - German tax classes II–VI, church tax, and the full amtliches Tarif formula (the current engine is a documented approximation)
 - Remaining European jurisdictions (FR, IT, ES, NL, CH, PL, SE, BE, IE, AT) need their own engines
 - Proration for mid-period joiners/leavers and retro adjustments
@@ -329,10 +329,10 @@ which is a stronger differentiator than adding more shallow modules.
 |---|---|
 | Mapped database tables | 51 |
 | Alembic migrations | 17 (single head `e7a8b9c0d1e2`) |
-| REST API routes (`/api/v1`) | 139 |
+| REST API routes (`/api/v1`) | 140 |
 | Web routes | 99 |
 | Service modules | 21 |
-| Tests | 409 passing across 19 files |
+| Tests | 411 passing across 19 files |
 | Supported UI locales | en, hi |
 | Country packs | 14 profiles (12 Europe + India + US) |
 | Payroll engines | UK PAYE/NI, German Lohnsteuer/social, generic fallback |
